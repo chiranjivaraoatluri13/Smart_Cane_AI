@@ -10,7 +10,8 @@ __pycache__/
 # Keep the ONNX export for cloud deployment — do NOT ignore it.
 # *.onnx
 weights/
-output/
+# Only ignore the top-level output/ folder (generated files), NOT navigation/output/
+/output/
 *.wav
 .DS_Store
 Thumbs.db

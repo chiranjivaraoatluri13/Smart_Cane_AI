@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "assistive-navigation"
+version = "0.1.0"
+description = "Real-time assistive navigation via vision, depth, safety reasoning, and voice"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "opencv-python>=4.9",
+    "pydantic>=2.5",
+    "pydantic-settings>=2.1",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+vision = [
+    "torch>=2.1",
+    "ultralytics>=8.4.52",
+]
+depth = [
+    "torch>=2.1",
+]
+llm = [
+    "langchain>=0.3",
+    "langchain-openai>=0.2",
+    "langchain-core>=0.3",
+]
+tts = [
+    "pyttsx3>=2.90",
+]
+server = [
+    "flask>=3.0",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+assistive-nav = "navigation.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["navigation*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

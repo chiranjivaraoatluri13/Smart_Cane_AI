@@ -1,0 +1,96 @@
+# Spatial-aware natural-language guidance — Template Library (Requirement 10).
+#
+# Instructive mode: phrases sound like a guide walking next to the user,
+# giving step-by-step directions ("take a few steps forward", "take a right").
+#
+# Each scenario tag has 3-5 paraphrases. The PhraseComposer picks one per
+# call, never picks the same one twice in a row when at least 2 are
+# configured, and substitutes placeholders from GuidanceFacts.
+#
+# Placeholders the composer fills in:
+#   {distance_phrase}    e.g. "about 30 feet ahead", "right in front of you"
+#   {side}               left | center | right | ahead
+#   {opposite_side}      right | left | ahead
+#   {category}           person | car | bicycle | pole | ...
+#   {category_list}      "person, bicycle"
+#   {turn_direction}     left | right | forward | stop
+#   {turn_direction_cap} Left | Right | Forward
+#   {meters_to_turn}     numeric meters (rounded)
+#   {feet_to_turn}       numeric feet (rounded)
+
+vision_stop_generic:
+  - "Wait."
+  - "Hold up here."
+  - "Pause for a moment."
+
+vision_stop_with_cause:
+  - "Wait, there's a {category} {distance_phrase}."
+  - "Hold up — {category} ahead, {distance_phrase}."
+  - "Stop for now, {category} on your {side}."
+  - "Wait a moment, the path is blocked."
+
+directional_warning_simple:
+  - "Take a {opposite_side}."
+  - "Step toward your {opposite_side}."
+  - "Lean a little to your {opposite_side}."
+
+directional_warning_with_freespace:
+  - "Take a {opposite_side}, your {opposite_side} is clear."
+  - "Step {opposite_side}, there's open space that way."
+  - "Move a little {opposite_side}; {category} on your {side}."
+
+approach_alert_static:
+  - "{category} {distance_phrase} on your {side}."
+  - "Heads up — {category} on your {side}, {distance_phrase}."
+  - "{category} ahead on your {side}, watch out."
+
+approach_alert_crossing:
+  - "{category} crossing in front of you."
+  - "Someone's crossing your path."
+  - "{category} moving across, hold a moment."
+
+map_turn_only:
+  - "In about {feet_to_turn} feet, take a {turn_direction}."
+  - "Take a {turn_direction} in about {feet_to_turn} feet."
+  - "{turn_direction_cap} turn coming up in about {feet_to_turn} feet."
+
+map_turn_with_vision_clear:
+  - "In about {feet_to_turn} feet, take a {turn_direction} — sidewalk is clear."
+  - "Path is clear. Take a {turn_direction} in about {feet_to_turn} feet."
+  - "Take a {turn_direction} in about {feet_to_turn} feet, your {turn_direction} is open."
+
+map_turn_with_caution:
+  - "Take a {turn_direction} in a moment, but slow down — {category} ahead."
+  - "Slow down. {turn_direction_cap} turn ahead, but the {turn_direction} side is blocked."
+  - "Hold for the {category} before taking the {turn_direction}."
+
+status_update_clear:
+  - "Path is clear, take a few steps forward."
+  - "Open sidewalk ahead. Keep walking."
+  - "All clear, you can keep going."
+  - "Path looks good, walk on."
+
+status_update_progress:
+  - "Still on track. About {feet_to_turn} feet to your turn."
+  - "On the right path. Take a {turn_direction} in about {feet_to_turn} feet."
+  - "You're heading the right way."
+
+stairs_warning_low_conf:
+  - "There may be a step ahead — slow down."
+  - "Possible step coming up, take it easy."
+  - "Watch your step, possible curb ahead."
+
+stairs_warning_with_stop:
+  - "Wait — there's a step right in front of you."
+  - "Stop, there's a step here."
+  - "Hold up — stair edge ahead."
+
+lane_blocked_all_sides:
+  - "Path is blocked, slow down."
+  - "All paths are blocked. Wait a moment."
+  - "No clear path right now, slow down."
+
+destination_reached:
+  - "You've arrived."
+  - "You're at your destination."
+  - "You're here."

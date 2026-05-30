@@ -1,0 +1,104 @@
+# Cityscapes 19-class semantic segmentation (yolo26n-sem.pt / yolo11n-sem.pt)
+# Class order matches Ultralytics cityscapes.yaml — keep names identical when fine-tuning.
+segmentation:
+  cityscapes_classes:
+    - road
+    - sidewalk
+    - building
+    - wall
+    - fence
+    - pole
+    - traffic light
+    - traffic sign
+    - vegetation
+    - terrain
+    - sky
+    - person
+    - rider
+    - car
+    - truck
+    - bus
+    - train
+    - motorcycle
+    - bicycle
+
+  road_classes: [road]
+  walkable_classes: [sidewalk, terrain, road]
+  obstacle_classes:
+    - person
+    - rider
+    - car
+    - truck
+    - bus
+    - train
+    - motorcycle
+    - bicycle
+    - pole
+    - fence
+  hazard_classes: [wall, fence, pole]
+
+# COCO 80-class instance segmentation (yolo26n-seg.pt / yolo11n-seg.pt)
+# Used when YOLO_MODEL_PATH ends in -seg.pt. These are the classes the
+# COCO model produces — everyday objects at human eye-level, much more
+# accurate for pedestrian-perspective obstacle detection than Cityscapes.
+coco_segmentation:
+  obstacle_classes:
+    - person
+    - bicycle
+    - car
+    - motorcycle
+    - bus
+    - truck
+    - train
+  # COCO has no "sidewalk" class — treat any unmasked ground as walkable.
+  walkable_classes: []
+
+# Allowed spoken commands (LLM must pick from this set)
+commands:
+  - move_left
+  - move_right
+  - go_forward
+  - slow_down
+  - stop
+
+# Depth thresholds (meters, approximate — tune per calibration)
+depth:
+  near_threshold_m: 1.5
+  critical_threshold_m: 0.8
+
+# Pipeline
+pipeline:
+  max_queue_depth: 1
+  skip_frames_on_backpressure: true
+
+# Distance bucketizer (Requirement 6/15) — single point of change when real
+# metric depth lands. Phrases stay stable; only thresholds and feet values
+# need updating.
+distance:
+  immediate_max_m: 1.2
+  near_max_m: 2.2
+  mid_max_m: 3.2
+  default_bucket: near
+  phrases:
+    immediate: "right in front of you"
+    near: "about 6 feet ahead"
+    mid: "about 10 feet ahead"
+    far: "about 30 feet ahead"
+
+# Voice queue (Requirement 9). Per-tier cooldowns in seconds. status_update
+# only emits when nothing else has been spoken for ``status_update_interval_sec``.
+voice:
+  cooldowns:
+    vision_stop: 0.0
+    directional_warning: 2.0
+    map_turn: 8.0
+    approach_alert: 3.0
+    status_update: 10.0
+  status_update_interval_sec: 10.0
+
+# Spatial perception + stairs heuristic (Requirements 2, 5, 14).
+spatial:
+  min_lane_walkable_ratio: 0.10
+  stairs_detector_enabled: true
+  stairs_min_edge_density: 0.08
+  stairs_min_confidence: 0.4

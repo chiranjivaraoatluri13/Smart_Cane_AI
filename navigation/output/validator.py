@@ -56,20 +56,15 @@ class CommandValidator:
             self._candidate = decision.command
             self._candidate_streak = 1
 
-        # Is this a *change* from the command that's currently active
-        # (last spoken)? A change is always worth announcing (subject to
-        # dwell + min-gap). A continuation is only re-announced after the
-        # cooldown elapses.
+        # Is this a *change* from the command that's currently active?
         changed = decision.command != self._active_command
 
-        # Layer 1: dwell. STOP bypasses (safety wins). A non-STOP command
-        # that hasn't been stable long enough is suppressed.
+        # Layer 1: dwell. STOP bypasses (safety wins).
         if not is_stop and self._candidate_streak < dwell_frames:
             return decision.model_copy(update={"speak": False})
 
         if changed:
-            # New command. Announce it — but respect the min-gap floor for
-            # non-STOP so we don't talk over a phrase from half a second ago.
+            # New command — announce it, respecting min-gap for non-STOP.
             if (
                 not is_stop
                 and decision.speak
@@ -78,8 +73,9 @@ class CommandValidator:
                 return decision.model_copy(update={"speak": False})
             speak = decision.speak
         else:
-            # Same command continuing. Re-announce only as an occasional
-            # reminder once the cooldown elapses.
+            # Same command continuing. Re-announce as a reminder once the
+            # cooldown elapses. This is how "take a right in 30 feet" gets
+            # repeated every N seconds while you're walking toward the turn.
             if (now - self._active_spoken_at) < cooldown:
                 return decision.model_copy(update={"speak": False})
             speak = decision.speak

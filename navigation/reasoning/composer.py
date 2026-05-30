@@ -134,6 +134,9 @@ class PhraseComposer:
                 if facts.command == map_cmd
                 else "map_turn_with_caution"
             )
+        # Route is active and we're heading the right way — give progress update.
+        if facts.route_cue is not None and facts.route_cue.turn == "forward":
+            return "status_update_progress"
         if facts.command in (NavigationCommand.MOVE_LEFT, NavigationCommand.MOVE_RIGHT):
             opposite = "right" if facts.command == NavigationCommand.MOVE_LEFT else "left"
             opp_walkable = facts.walkable_by_side.get(opposite, 0.0)

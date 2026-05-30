@@ -71,9 +71,10 @@ status_update_clear:
   - "Path looks good, walk on."
 
 status_update_progress:
-  - "Still on track. About {feet_to_turn} feet to your turn."
-  - "On the right path. Take a {turn_direction} in about {feet_to_turn} feet."
-  - "You're heading the right way."
+  - "Keep going, about {feet_to_turn} feet to your destination."
+  - "You're on track. Destination in about {feet_to_turn} feet."
+  - "Continue forward, about {feet_to_turn} feet to go."
+  - "Heading the right way. About {feet_to_turn} feet remaining."
 
 stairs_warning_low_conf:
   - "There may be a step ahead — slow down."

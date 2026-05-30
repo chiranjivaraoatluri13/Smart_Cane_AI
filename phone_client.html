@@ -569,7 +569,30 @@
                     
                     // Update UI
                     commandDiv.textContent = result.phrase;
-                    detailsDiv.textContent = result.rationale || '';
+
+                    // Show route cue in the details line so the user can
+                    // see what the server is computing even when it's not
+                    // speaking (e.g. during cooldown or when command hasn't
+                    // changed). This is the key diagnostic for map guidance.
+                    let detailText = result.rationale || '';
+                    if (result.facts && result.facts.route_cue) {
+                        const rc = result.facts.route_cue;
+                        const feet = Math.round((rc.meters_to_turn || 0) * 3.281);
+                        if (rc.turn === 'stop') {
+                            detailText = '📍 Destination in ' + feet + ' ft';
+                        } else if (rc.turn === 'left') {
+                            detailText = '↰ Turn left in ' + feet + ' ft';
+                        } else if (rc.turn === 'right') {
+                            detailText = '↱ Turn right in ' + feet + ' ft';
+                        } else if (rc.turn === 'forward') {
+                            detailText = '↑ Continue ' + feet + ' ft';
+                        }
+                    }
+                    // Also show GPS status so we know if location is working.
+                    if (lastPosition.lat == null) {
+                        detailText = '⚠ No GPS — location permission needed for directions';
+                    }
+                    detailsDiv.textContent = detailText;
 
                     // Update status bar color
                     statusBar.className = '';

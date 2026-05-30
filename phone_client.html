@@ -1,284 +1,328 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Assistive Navigation - Phone Client</title>
+    <title>Assistive Navigation</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
             background: #000;
             color: #fff;
             overflow: hidden;
-        }
-        
-        #container {
-            position: relative;
-            width: 100vw;
             height: 100vh;
+            width: 100vw;
+        }
+
+        /* ── Camera fills the whole background ── */
+        #video {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            z-index: 0;
+        }
+
+        /* ── Full-screen overlay — children opt-in to pointer events ── */
+        #overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 10;
+            pointer-events: none;
             display: flex;
             flex-direction: column;
+            align-items: stretch;
         }
-        
-        #video-container {
-            flex: 1;
+
+        /* ════════════════════════════════════════
+           TOP: Search bar
+        ════════════════════════════════════════ */
+        #search-area {
+            pointer-events: auto;
+            padding: calc(env(safe-area-inset-top, 12px) + 8px) 16px 0;
             position: relative;
-            background: #000;
-        }
-        
-        #video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        #overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            pointer-events: none;
-        }
-        
-        #status-bar {
-            position: absolute;
-            top: calc(env(safe-area-inset-top, 20px) + 60px);
-            left: 20px;
-            right: 20px;
-            padding: 20px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-            transition: all 0.3s;
-            cursor: pointer;
         }
 
-        #dest-bar {
-            position: absolute;
-            top: env(safe-area-inset-top, 10px);
-            left: 10px;
-            right: 10px;
+        #search-wrapper {
+            position: relative;
             display: flex;
-            gap: 8px;
-            z-index: 10;
-            pointer-events: auto;
+            align-items: center;
+            background: #fff;
+            border-radius: 26px;
+            height: 52px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.55);
+            overflow: visible;
         }
 
-        #dest-select {
-            flex: 1;
-            padding: 10px 14px;
-            border-radius: 10px;
-            border: none;
-            font-size: 15px;
-            background: rgba(255, 255, 255, 0.95);
-            color: #111;
-            pointer-events: auto;
-            appearance: auto;
+        #search-icon {
+            flex-shrink: 0;
+            width: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #555;
+            font-size: 18px;
         }
 
-        #dest-input {
+        #search-input {
             flex: 1;
-            padding: 10px 14px;
-            border-radius: 10px;
             border: none;
+            outline: none;
+            background: transparent;
             font-size: 16px;
-            background: rgba(255, 255, 255, 0.95);
             color: #111;
-            pointer-events: auto;
+            padding-right: 12px;
+            height: 100%;
+        }
+
+        #search-input::placeholder { color: #999; }
+
+        /* Suggestions dropdown */
+        #suggestions {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0; right: 0;
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+            overflow: hidden;
+            z-index: 100;
             display: none;
         }
 
-        #set-dest-btn {
-            padding: 10px 18px;
-            border-radius: 10px;
-            border: none;
-            background: rgba(255, 255, 255, 0.95);
+        .suggestion-item {
+            display: flex;
+            align-items: center;
+            height: 52px;
+            padding: 0 16px;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f0f0;
             color: #111;
-            font-weight: 600;
-            min-width: auto;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-            pointer-events: auto;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
-        #route-status {
-            position: absolute;
-            top: calc(env(safe-area-inset-top, 10px) + 52px);
-            left: 10px;
-            right: 10px;
-            padding: 6px 12px;
-            border-radius: 8px;
-            background: rgba(0, 0, 0, 0.75);
+        .suggestion-item:last-child { border-bottom: none; }
+
+        .suggestion-item:active { background: #f5f5f5; }
+
+        .suggestion-pin {
+            flex-shrink: 0;
+            margin-right: 10px;
+            color: #888;
+            font-size: 16px;
+        }
+
+        /* Confirmation toast */
+        #dest-confirm {
+            margin-top: 8px;
+            padding: 8px 14px;
+            border-radius: 10px;
+            background: rgba(0,140,0,0.88);
             color: #fff;
             font-size: 13px;
             text-align: center;
-            z-index: 10;
-            pointer-events: none;
             display: none;
-        }
-        
-        #status-bar.go {
-            background: rgba(0, 120, 255, 0.9);
-        }
-        
-        #status-bar.stop {
-            background: rgba(255, 59, 48, 0.9);
-        }
-        
-        #status-bar.slow {
-            background: rgba(255, 149, 0, 0.9);
-        }
-        
-        #status-bar.idle {
-            background: rgba(100, 100, 100, 0.9);
-        }
-        
-        #command {
-            font-size: 36px;
-            font-weight: bold;
-            text-align: center;
-            text-transform: uppercase;
-        }
-        
-        #details {
-            font-size: 14px;
-            text-align: center;
-            margin-top: 10px;
-            opacity: 0.9;
-        }
-        
-        #controls {
-            position: absolute;
-            left: 0;
-            right: 0;
-            bottom: 30px;
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            padding: 0 20px env(safe-area-inset-bottom, 0px);
-            z-index: 10;
+            pointer-events: none;
         }
 
-        button {
-            padding: 18px 40px;
-            font-size: 20px;
-            font-weight: bold;
-            border: none;
-            border-radius: 25px;
-            cursor: pointer;
-            transition: all 0.3s;
-            backdrop-filter: blur(10px);
-            min-width: 200px;
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        /* ════════════════════════════════════════
+           CENTER: Command display
+        ════════════════════════════════════════ */
+        #command-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 0 24px;
+            pointer-events: none;
         }
-        
-        #start-btn {
-            background: rgba(52, 199, 89, 0.9);
-            color: white;
-        }
-        
-        #stop-btn {
-            background: rgba(255, 59, 48, 0.9);
-            color: white;
-        }
-        
-        button:active {
-            transform: scale(0.95);
-        }
-        
-        #stats {
-            position: absolute;
-            bottom: 100px;
-            left: 20px;
-            right: 20px;
-            padding: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            border-radius: 10px;
-            font-size: 12px;
+
+        #command {
+            font-size: 48px;
+            font-weight: 700;
             text-align: center;
+            text-transform: uppercase;
+            color: #fff;
+            text-shadow: 0 2px 12px rgba(0,0,0,0.8);
+            line-height: 1.1;
+        }
+
+        #details {
+            margin-top: 12px;
+            font-size: 16px;
+            color: #ddd;
+            text-align: center;
+            text-shadow: 0 1px 6px rgba(0,0,0,0.9);
+            max-width: 320px;
+        }
+
+        /* ════════════════════════════════════════
+           BOTTOM: Route status + Start/Stop button
+        ════════════════════════════════════════ */
+        #bottom-area {
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-bottom: calc(env(safe-area-inset-bottom, 16px) + 16px);
+            gap: 12px;
+        }
+
+        #route-status {
+            pointer-events: none;
+            padding: 8px 20px;
+            border-radius: 20px;
+            background: rgba(0,0,0,0.65);
+            backdrop-filter: blur(6px);
+            color: #fff;
+            font-size: 15px;
+            text-align: center;
+            display: none;
+            max-width: calc(100vw - 40px);
+        }
+
+        #controls {
+            pointer-events: auto;
+            display: flex;
+            justify-content: center;
+        }
+
+        #start-btn, #stop-btn {
+            width: 200px;
+            height: 60px;
+            font-size: 20px;
+            font-weight: 700;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.5);
+            transition: transform 0.15s;
+        }
+
+        #start-btn { background: #34c759; color: #fff; }
+        #stop-btn  { background: #ff3b30; color: #fff; }
+
+        #start-btn:active, #stop-btn:active { transform: scale(0.95); }
+
+        /* ════════════════════════════════════════
+           Connection dot (top-right)
+        ════════════════════════════════════════ */
+        #connection-status {
+            position: fixed;
+            top: calc(env(safe-area-inset-top, 12px) + 18px);
+            right: 18px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff3b30;
+            z-index: 20;
+            pointer-events: none;
+            transition: background 0.3s;
+        }
+
+        #connection-status.connected { background: #34c759; }
+
+        /* ════════════════════════════════════════
+           Debug panel (bottom-right, collapsible)
+        ════════════════════════════════════════ */
+        #debug-toggle {
+            position: fixed;
+            bottom: calc(env(safe-area-inset-bottom, 16px) + 80px);
+            right: 12px;
+            z-index: 30;
+            pointer-events: auto;
+            background: rgba(0,0,0,0.7);
+            border: 1px solid #444;
+            border-radius: 8px;
+            color: #0f0;
+            font-size: 11px;
+            padding: 4px 8px;
+            cursor: pointer;
+            user-select: none;
         }
 
         #debug {
-            position: absolute;
-            bottom: 110px;
+            position: fixed;
+            bottom: calc(env(safe-area-inset-bottom, 16px) + 108px);
             left: 10px;
             right: 10px;
-            max-height: 35vh;
+            max-height: 30vh;
             overflow-y: auto;
             padding: 8px 10px;
-            background: rgba(0, 0, 0, 0.85);
+            background: rgba(0,0,0,0.88);
             border: 1px solid #333;
             border-radius: 8px;
             font-family: monospace;
             font-size: 11px;
             color: #0f0;
-            z-index: 5;
+            z-index: 25;
+            pointer-events: auto;
+            display: none;
         }
 
-        #debug.hidden { display: none; }
-        
-        #connection-status {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #ff3b30;
-            transition: all 0.3s;
-        }
-        
-        #connection-status.connected {
-            background: #34c759;
-        }
-        
-        .hidden {
-            display: none !important;
-        }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
-    <div id="container">
-        <div id="video-container">
-            <video id="video" autoplay playsinline muted></video>
-            <div id="overlay">
-                <div id="dest-bar">
-                    <select id="dest-select" onchange="onDestSelectChange()">
-                        <option value="">-- Pick a destination --</option>
-                        <option value="custom">Type an address...</option>
-                        <optgroup label="Common destinations">
-                            <option value="Trader Joe's Tempe AZ">Trader Joe's Tempe AZ</option>
-                            <option value="Walmart Tempe AZ">Walmart Tempe AZ</option>
-                            <option value="Starbucks Tempe AZ">Starbucks Tempe AZ</option>
-                            <option value="ASU Tempe Campus AZ">ASU Tempe Campus AZ</option>
-                            <option value="Tempe Marketplace AZ">Tempe Marketplace AZ</option>
-                        </optgroup>
-                    </select>
-                    <input id="dest-input" type="text" placeholder="Type address..." autocomplete="off">
-                    <button id="set-dest-btn" type="button">Go</button>
-                </div>
-                <div id="route-status"></div>
-                <div id="status-bar" class="idle" onclick="toggleNavigation()">
-                    <div id="command">Ready</div>
-                    <div id="details">Tap anywhere to start navigation</div>
-                </div>
-                <div id="connection-status"></div>
-                <div id="stats" class="hidden">
-                    <div>FPS: <span id="fps">0</span> | Processing: <span id="proc-time">0</span>ms</div>
-                    <div>Walkable: <span id="walkable">0</span>% | Obstacles: <span id="obstacles">0</span></div>
-                </div>
-                <div id="debug">debug log loading…</div>
+
+    <!-- Camera background -->
+    <video id="video" autoplay playsinline muted></video>
+
+    <!-- Connection indicator -->
+    <div id="connection-status"></div>
+
+    <!-- Main overlay -->
+    <div id="overlay">
+
+        <!-- TOP: Search bar -->
+        <div id="search-area">
+            <div id="search-wrapper">
+                <div id="search-icon">🔍</div>
+                <input
+                    id="search-input"
+                    type="text"
+                    placeholder="Search destination…"
+                    autocomplete="off"
+                    autocorrect="off"
+                    spellcheck="false"
+                >
+                <!-- Suggestions dropdown (inside wrapper for positioning) -->
+                <div id="suggestions"></div>
             </div>
+            <div id="dest-confirm"></div>
+        </div>
+
+        <!-- CENTER: Command display -->
+        <div id="command-area">
+            <div id="command">Ready</div>
+            <div id="details">Tap Start to begin navigation</div>
+        </div>
+
+        <!-- BOTTOM: Route status + button -->
+        <div id="bottom-area">
+            <div id="route-status"></div>
             <div id="controls">
                 <button id="start-btn" onclick="startNavigation()">Start Navigation</button>
-                <button id="stop-btn" onclick="stopNavigation()" class="hidden">Stop</button>
+                <button id="stop-btn"  onclick="stopNavigation()" class="hidden">Stop</button>
             </div>
         </div>
+
     </div>
 
+    <!-- Debug panel toggle (outside overlay so it's always tappable) -->
+    <div id="debug-toggle" onclick="toggleDebug()">DBG ▸</div>
+    <div id="debug">debug log loading…</div>
+
     <script>
-        // Visible debug log so we can diagnose phone-side issues without a
-        // dev console. Touch a line to copy. Cleared on each reload.
+        // ============================================================
+        // Debug log
+        // ============================================================
         const _debugEl = document.getElementById('debug');
         const _debugLines = [];
         function dbg(...args) {
@@ -291,38 +335,47 @@
             _debugEl.scrollTop = _debugEl.scrollHeight;
             console.log(line);
         }
-        dbg('client v3 loaded — secure context:', window.isSecureContext,
+
+        function toggleDebug() {
+            const panel = document.getElementById('debug');
+            const btn   = document.getElementById('debug-toggle');
+            if (panel.style.display === 'block') {
+                panel.style.display = 'none';
+                btn.textContent = 'DBG ▸';
+            } else {
+                panel.style.display = 'block';
+                btn.textContent = 'DBG ▾';
+            }
+        }
+
+        dbg('client v4 loaded — secure context:', window.isSecureContext,
             'mediaDevices:', !!navigator.mediaDevices);
+
         // ============================================================
-        // CONFIGURATION
+        // Configuration
         // ============================================================
-        // Auto-detects the server URL from wherever this page was served.
-        // Works for both local laptop (https://192.168.x.x:5000) and
-        // cloud deployment (https://your-app.railway.app).
         const SERVER_URL = window.location.origin;
-        
+
         // ============================================================
         // Global state
         // ============================================================
-        let video = document.getElementById('video');
-        let statusBar = document.getElementById('status-bar');
-        let commandDiv = document.getElementById('command');
-        let detailsDiv = document.getElementById('details');
-        let statsDiv = document.getElementById('stats');
-        let connStatus = document.getElementById('connection-status');
-        let startBtn = document.getElementById('start-btn');
-        let stopBtn = document.getElementById('stop-btn');
-        
-        let isRunning = false;
-        let synth = window.speechSynthesis;
-        let frameCount = 0;
-        // Live GPS + compass — populated when the phone provides them.
-        let lastPosition = { lat: null, lon: null, accuracy: null };
-        let lastHeading = null;
+        const video       = document.getElementById('video');
+        const commandDiv  = document.getElementById('command');
+        const detailsDiv  = document.getElementById('details');
+        const connStatus  = document.getElementById('connection-status');
+        const startBtn    = document.getElementById('start-btn');
+        const stopBtn     = document.getElementById('stop-btn');
+        const routeStatus = document.getElementById('route-status');
 
-        // Single entry point used by both the on-screen button and a tap on
-        // the status banner (helpful on phones where the bottom button gets
-        // clipped by the URL bar / home indicator).
+        let isRunning   = false;
+        let synth       = window.speechSynthesis;
+        let frameCount  = 0;
+        let lastPosition = { lat: null, lon: null, accuracy: null };
+        let lastHeading  = null;
+
+        // ============================================================
+        // Navigation toggle (tap status area or button)
+        // ============================================================
         function toggleNavigation() {
             dbg('toggleNavigation tapped, isRunning=', isRunning);
             if (isRunning) {
@@ -332,65 +385,88 @@
             }
         }
 
-        // Set destination — geocodes via /set_destination and arms map mode.
-        async function setDestination() {
-            const select = document.getElementById('dest-select');
-            const input = document.getElementById('dest-input');
-            const routeStatus = document.getElementById('route-status');
+        // ============================================================
+        // Destination search — Nominatim suggestions
+        // ============================================================
+        const searchInput   = document.getElementById('search-input');
+        const suggestionsEl = document.getElementById('suggestions');
+        const destConfirm   = document.getElementById('dest-confirm');
 
-            let address = '';
-            if (select && (select.value === 'custom' || select.value === '')) {
-                address = input ? input.value.trim() : '';
-            } else if (select && select.value) {
-                address = select.value;
-            } else {
-                address = input ? input.value.trim() : '';
+        let _suggestTimer = null;
+
+        async function fetchSuggestions(query) {
+            if (query.length < 2) { hideSuggestions(); return; }
+            try {
+                const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=1`;
+                const r = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+                const results = await r.json();
+                showSuggestions(results);
+            } catch(e) {
+                hideSuggestions();
             }
+        }
 
+        function showSuggestions(results) {
+            if (!results || results.length === 0) { hideSuggestions(); return; }
+            suggestionsEl.innerHTML = '';
+            results.slice(0, 5).forEach(result => {
+                const label = result.display_name.length > 60
+                    ? result.display_name.slice(0, 60) + '…'
+                    : result.display_name;
+                const item = document.createElement('div');
+                item.className = 'suggestion-item';
+                item.innerHTML = `<span class="suggestion-pin">📍</span><span>${label}</span>`;
+                item.addEventListener('pointerdown', (e) => {
+                    e.preventDefault();
+                    searchInput.value = result.display_name;
+                    hideSuggestions();
+                    setDestination(result.display_name);
+                });
+                suggestionsEl.appendChild(item);
+            });
+            suggestionsEl.style.display = 'block';
+        }
+
+        function hideSuggestions() {
+            suggestionsEl.style.display = 'none';
+            suggestionsEl.innerHTML = '';
+        }
+
+        async function setDestination(address) {
+            if (!address) address = searchInput.value.trim();
             if (!address) { dbg('destination empty'); return; }
 
-            routeStatus.style.display = 'block';
-            routeStatus.style.background = 'rgba(0,0,0,0.75)';
-            routeStatus.textContent = '🔍 Finding ' + address + '...';
+            hideSuggestions();
+
+            destConfirm.style.display = 'block';
+            destConfirm.style.background = 'rgba(0,0,0,0.75)';
+            destConfirm.textContent = '🔍 Finding ' + address + '…';
 
             const body = new URLSearchParams({ address });
             try {
                 const r = await fetch(SERVER_URL + '/set_destination', { method: 'POST', body });
                 const j = await r.json();
                 if (j.ok) {
-                    routeStatus.style.background = 'rgba(0,120,0,0.85)';
-                    routeStatus.textContent = '✓ Navigating to ' + address;
+                    destConfirm.style.background = 'rgba(0,140,0,0.88)';
+                    destConfirm.textContent = '✓ Navigating to ' + address;
                     dbg('destination set:', address, '→', j.lat.toFixed(4) + ',' + j.lon.toFixed(4));
-                    setTimeout(() => { routeStatus.style.display = 'none'; }, 4000);
+                    setTimeout(() => { destConfirm.style.display = 'none'; }, 4000);
                 } else {
-                    routeStatus.style.background = 'rgba(180,0,0,0.85)';
-                    routeStatus.textContent = '✗ Not found: ' + address;
+                    destConfirm.style.background = 'rgba(180,0,0,0.88)';
+                    destConfirm.textContent = '✗ Not found: ' + address;
                     dbg('destination error:', j.error);
+                    setTimeout(() => { destConfirm.style.display = 'none'; }, 4000);
                 }
             } catch (e) {
-                routeStatus.style.background = 'rgba(180,0,0,0.85)';
-                routeStatus.textContent = '✗ Connection error';
+                destConfirm.style.background = 'rgba(180,0,0,0.88)';
+                destConfirm.textContent = '✗ Connection error';
                 dbg('destination request failed:', e.message);
+                setTimeout(() => { destConfirm.style.display = 'none'; }, 4000);
             }
         }
 
-        function onDestSelectChange() {
-            const select = document.getElementById('dest-select');
-            const input = document.getElementById('dest-input');
-            if (select.value === 'custom') {
-                input.style.display = 'block';
-                select.style.flex = '0 0 120px';
-                input.focus();
-            } else {
-                input.style.display = 'none';
-                select.style.flex = '1';
-                if (select.value) setDestination();
-            }
-        }
-        
         // ============================================================
-        // GPS + compass — best effort. Browsers vary widely; we send what
-        // we have and let the server fall back to .env defaults.
+        // GPS + compass
         // ============================================================
         function startGeolocation() {
             if (!('geolocation' in navigator)) {
@@ -399,11 +475,9 @@
             }
             navigator.geolocation.watchPosition(
                 (pos) => {
-                    lastPosition.lat = pos.coords.latitude;
-                    lastPosition.lon = pos.coords.longitude;
+                    lastPosition.lat      = pos.coords.latitude;
+                    lastPosition.lon      = pos.coords.longitude;
                     lastPosition.accuracy = pos.coords.accuracy;
-                    // Some phones (and most laptops) only report heading
-                    // when moving; treat null as "unknown".
                     if (pos.coords.heading != null && !Number.isNaN(pos.coords.heading)) {
                         lastHeading = pos.coords.heading;
                     }
@@ -414,11 +488,7 @@
         }
 
         function startCompass() {
-            // iOS 13+ requires explicit permission; everywhere else, just listen.
             const handler = (event) => {
-                // ``webkitCompassHeading`` is iOS-specific (0 = north, 360 = north).
-                // ``alpha`` on Android is 0 = device pointing north, decreasing clockwise,
-                // so we convert to compass heading by subtracting from 360.
                 if (typeof event.webkitCompassHeading === 'number') {
                     lastHeading = event.webkitCompassHeading;
                 } else if (typeof event.alpha === 'number') {
@@ -442,6 +512,9 @@
             }
         }
 
+        // ============================================================
+        // Camera
+        // ============================================================
         async function initCamera() {
             try {
                 if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -453,25 +526,23 @@
                 dbg('requesting camera…');
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        facingMode: 'environment',  // Back camera
-                        width: { ideal: 640 },
+                        facingMode: 'environment',
+                        width:  { ideal: 640 },
                         height: { ideal: 480 }
                     }
                 });
                 video.srcObject = stream;
                 dbg('camera ok');
-                console.log('Camera initialized');
             } catch (error) {
                 commandDiv.textContent = 'Camera blocked';
                 detailsDiv.textContent = (error.name || 'Error') + ': ' + error.message;
-                statusBar.className = 'stop';
                 dbg('CAMERA ERROR:', error.name || 'Error', error.message);
                 console.error('Camera error:', error);
             }
         }
-        
+
         // ============================================================
-        // Check server connection
+        // Server connection check
         // ============================================================
         async function checkConnection() {
             try {
@@ -488,95 +559,86 @@
             }
             return false;
         }
-        
+
         // ============================================================
         // Start navigation
         // ============================================================
         async function startNavigation() {
             dbg('startNavigation() tapped');
-            // Check connection first
             const connected = await checkConnection();
             if (!connected) {
                 dbg('server unreachable at', SERVER_URL);
-                alert('Cannot connect to server at ' + SERVER_URL + '\n\nMake sure:\n1. Server is running on laptop\n2. Phone and laptop are on same WiFi\n3. IP address is correct');
+                alert('Cannot connect to server at ' + SERVER_URL +
+                    '\n\nMake sure:\n1. Server is running on laptop\n2. Phone and laptop are on same WiFi\n3. IP address is correct');
                 return;
             }
             dbg('server reachable');
 
-            isRunning = true;
+            isRunning  = true;
             frameCount = 0;
-            
+
             startBtn.classList.add('hidden');
             stopBtn.classList.remove('hidden');
-            statsDiv.classList.remove('hidden');
-            
-            commandDiv.textContent = 'Starting...';
+
+            commandDiv.textContent = 'Starting…';
             detailsDiv.textContent = 'Initializing navigation';
-            
+
             processFrame();
         }
-        
+
         // ============================================================
         // Stop navigation
         // ============================================================
         function stopNavigation() {
             isRunning = false;
-            
+
             startBtn.classList.remove('hidden');
             stopBtn.classList.add('hidden');
-            statsDiv.classList.add('hidden');
-            
-            statusBar.className = 'idle';
+
+            routeStatus.style.display = 'none';
             commandDiv.textContent = 'Stopped';
             detailsDiv.textContent = 'Tap Start to resume';
         }
-        
+
         // ============================================================
         // Process frame
         // ============================================================
         async function processFrame() {
             if (!isRunning) return;
-            
+
             frameCount++;
-            
-            // Capture frame from video
-            let canvas = document.createElement('canvas');
-            canvas.width = 640;
+
+            const canvas = document.createElement('canvas');
+            canvas.width  = 640;
             canvas.height = 480;
-            let ctx = canvas.getContext('2d');
+            const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, 640, 480);
-            
-            // Convert to blob
+
             canvas.toBlob(async (blob) => {
-                let formData = new FormData();
+                const formData = new FormData();
                 formData.append('frame', blob, 'frame.jpg');
-                if (lastPosition.lat != null) formData.append('lat', String(lastPosition.lat));
-                if (lastPosition.lon != null) formData.append('lon', String(lastPosition.lon));
+                if (lastPosition.lat      != null) formData.append('lat',      String(lastPosition.lat));
+                if (lastPosition.lon      != null) formData.append('lon',      String(lastPosition.lon));
                 if (lastPosition.accuracy != null) formData.append('accuracy', String(lastPosition.accuracy));
-                if (lastHeading != null) formData.append('heading', String(lastHeading));
-                
+                if (lastHeading           != null) formData.append('heading',  String(lastHeading));
+
                 try {
-                    let response = await fetch(SERVER_URL + '/process_frame', {
+                    const response = await fetch(SERVER_URL + '/process_frame', {
                         method: 'POST',
                         body: formData
                     });
-                    
-                    if (!response.ok) {
-                        throw new Error('Server error: ' + response.status);
-                    }
-                    
-                    let result = await response.json();
-                    
-                    // Update UI
+
+                    if (!response.ok) throw new Error('Server error: ' + response.status);
+
+                    const result = await response.json();
+
+                    // ── Command text ──
                     commandDiv.textContent = result.phrase;
 
-                    // Show route cue in the details line so the user can
-                    // see what the server is computing even when it's not
-                    // speaking (e.g. during cooldown or when command hasn't
-                    // changed). This is the key diagnostic for map guidance.
+                    // ── Details / route cue ──
                     let detailText = result.rationale || '';
                     if (result.facts && result.facts.route_cue) {
-                        const rc = result.facts.route_cue;
+                        const rc   = result.facts.route_cue;
                         const feet = Math.round((rc.meters_to_turn || 0) * 3.281);
                         if (rc.turn === 'stop') {
                             detailText = '📍 Destination in ' + feet + ' ft';
@@ -588,122 +650,89 @@
                             detailText = '↑ Continue ' + feet + ' ft';
                         }
                     }
-                    // Also show GPS status so we know if location is working.
                     if (lastPosition.lat == null) {
                         detailText = '⚠ No GPS — location permission needed for directions';
                     }
                     detailsDiv.textContent = detailText;
 
-                    // Update status bar color
-                    statusBar.className = '';
-                    if (result.command === 'stop') {
-                        statusBar.classList.add('stop');
-                    } else if (result.command === 'slow_down') {
-                        statusBar.classList.add('slow');
-                    } else {
-                        statusBar.classList.add('go');
+                    // ── Route status strip ──
+                    if (result.facts && result.facts.route_cue) {
+                        routeStatus.textContent = detailText;
+                        routeStatus.style.display = 'block';
                     }
 
-                    // Update stats — these come from the spatial pipeline
-                    // via the ``facts`` payload now. Older builds put
-                    // walkable_ratio / obstacle_pixels at the top level;
-                    // we tolerate both so a stale phone tab still shows
-                    // *some* numbers.
-                    document.getElementById('fps').textContent = result.fps || 0;
-                    document.getElementById('proc-time').textContent = result.processing_time_ms || 0;
-                    let walkPct = 0;
-                    let obstacleN = 0;
-                    if (result.facts && result.facts.walkable_by_side) {
-                        const w = result.facts.walkable_by_side;
-                        // Show the *center* lane walkable as the headline.
-                        walkPct = Math.round(((w.center || 0)) * 100);
-                        // Number of distinct hazards across all sides.
-                        const h = result.facts.hazards_by_side || {};
-                        obstacleN =
-                            (h.left || []).length +
-                            (h.center || []).length +
-                            (h.right || []).length;
-                    } else {
-                        walkPct = Math.round((result.walkable_ratio || 0) * 100);
-                        obstacleN = result.obstacle_pixels || 0;
-                    }
-                    document.getElementById('walkable').textContent = walkPct;
-                    document.getElementById('obstacles').textContent = obstacleN;
-
-                    // Speech: throw away anything still pending in the
-                    // browser's TTS queue before speaking the next phrase.
-                    // Without this, if two consecutive frames are approved
-                    // by the server's voice queue (within milliseconds of
-                    // each other), both phrases pile up and the user hears
-                    // them back-to-back even though the scene didn't change.
-                    // Cancelling first means the *latest* command wins —
-                    // which is exactly what a real-time guidance system
-                    // wants. STOP commands stay reactive because they're
-                    // always approved by the server, and `cancel()` clears
-                    // any stale "go forward" so the STOP is heard now.
+                    // ── Speech ──
                     const wantsToSpeak =
                         (synth && Array.isArray(result.alerts) && result.alerts.length > 0) ||
                         (synth && result.speak);
-                    if (wantsToSpeak) {
-                        synth.cancel();
-                    }
+                    if (wantsToSpeak) synth.cancel();
 
-                    // Speak alerts FIRST (e.g. "Heavy vehicle approaching")
-                    // so the user hears the warning before the command. The
-                    // server already cooldown-gated these to roughly one
-                    // per category every few seconds.
                     if (synth && Array.isArray(result.alerts)) {
                         for (const alert of result.alerts) {
                             const aUtt = new SpeechSynthesisUtterance(alert.phrase);
-                            aUtt.rate = 1.15;
+                            aUtt.rate   = 1.15;
                             aUtt.volume = 1.0;
                             synth.speak(aUtt);
                             dbg('alert:', alert.phrase);
                         }
                     }
 
-                    // Speak command — server already gated this through the
-                    // dwell filter and voice-queue cooldown. ``result.speak``
-                    // is the queue's verdict, not just the validator's.
                     if (result.speak && synth) {
                         const utterance = new SpeechSynthesisUtterance(result.phrase);
-                        utterance.rate = 1.2;
+                        utterance.rate   = 1.2;
                         utterance.volume = 1.0;
                         synth.speak(utterance);
                     }
-                    
+
                     connStatus.classList.add('connected');
-                    
+
                 } catch (error) {
                     console.error('Processing error:', error);
                     commandDiv.textContent = 'Error';
                     detailsDiv.textContent = error.message;
-                    statusBar.className = 'idle';
                     connStatus.classList.remove('connected');
                 }
-                
-                // Process next frame after 300ms (3 FPS)
+
                 setTimeout(processFrame, 300);
             }, 'image/jpeg', 0.8);
         }
-        
+
         // ============================================================
         // Initialize on load
         // ============================================================
         window.onload = async () => {
-            console.log('Initializing...');
+            console.log('Initializing…');
             await initCamera();
             await checkConnection();
             startGeolocation();
             startCompass();
-            // Hook up the destination bar handlers.
-            document.getElementById('set-dest-btn').addEventListener('click', setDestination);
-            document.getElementById('dest-input').addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') setDestination();
+
+            // Search input: debounced suggestions on typing
+            searchInput.addEventListener('input', () => {
+                clearTimeout(_suggestTimer);
+                const q = searchInput.value.trim();
+                _suggestTimer = setTimeout(() => fetchSuggestions(q), 300);
             });
+
+            // Enter key submits the current text directly
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    hideSuggestions();
+                    setDestination(searchInput.value.trim());
+                    searchInput.blur();
+                }
+            });
+
+            // Tap outside search area hides suggestions
+            document.addEventListener('pointerdown', (e) => {
+                if (!document.getElementById('search-area').contains(e.target)) {
+                    hideSuggestions();
+                }
+            });
+
             console.log('Ready!');
         };
-        
+
         // Keep screen awake
         if ('wakeLock' in navigator) {
             navigator.wakeLock.request('screen').catch(err => {

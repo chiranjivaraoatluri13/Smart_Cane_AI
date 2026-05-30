@@ -2,7 +2,7 @@ services:
   - type: web
     name: smart-cane-ai
     runtime: python
-    buildCommand: pip install -r requirements-cloud.txt
+    buildCommand: pip install -r requirements-cloud.txt && pip install -e . --no-deps
     startCommand: gunicorn phone_server_cloud:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
     healthCheckPath: /health
     envVars:

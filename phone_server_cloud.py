@@ -226,6 +226,23 @@ def stats():
     })
 
 
+@app.route("/debug_route", methods=["GET"])
+def debug_route():
+    """Diagnostic — shows GPS, destination, and route state."""
+    s = interpreter.settings
+    mg = getattr(interpreter, "_map_guidance", None)
+    return jsonify({
+        "use_map_guidance": s.use_map_guidance,
+        "dest_lat": s.dest_lat,
+        "dest_lon": s.dest_lon,
+        "map_guidance_active": mg is not None,
+        "map_route_attempted": getattr(interpreter, "_map_route_attempted", None),
+        "route_waypoints": len(mg.route.waypoints) if mg else 0,
+        "route_distance_m": mg.route.distance_m if mg else None,
+        "frames_processed": frame_id,
+    })
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, threaded=True, debug=False)

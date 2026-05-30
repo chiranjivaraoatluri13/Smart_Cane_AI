@@ -32,6 +32,14 @@ import os
 import sys
 import threading
 import time
+import pathlib
+
+# Ensure the project root is on sys.path so `navigation.*` is importable
+# regardless of how the package was installed. This is the most reliable
+# approach for cloud deployments where editable installs can be finicky.
+_project_root = pathlib.Path(__file__).parent.resolve()
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
 import cv2
 import numpy as np
@@ -41,8 +49,9 @@ from flask import Flask, jsonify, request, send_from_directory
 print(f"Python {sys.version}", flush=True)
 print(f"YOLO_MODEL_PATH={os.environ.get('YOLO_MODEL_PATH', 'NOT SET')}", flush=True)
 print(f"Working dir: {os.getcwd()}", flush=True)
-import pathlib
+print(f"sys.path[0]: {sys.path[0]}", flush=True)
 print(f"ONNX file exists: {pathlib.Path(os.environ.get('YOLO_MODEL_PATH', 'yolo26n-sem.onnx')).is_file()}", flush=True)
+print(f"navigation package: {(_project_root / 'navigation' / '__init__.py').is_file()}", flush=True)
 
 from navigation.config import load_settings
 from navigation.maps.router import geocode_address

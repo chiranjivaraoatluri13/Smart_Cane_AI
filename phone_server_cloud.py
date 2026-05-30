@@ -29,12 +29,20 @@ Environment variables to set in Render dashboard:
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 
 import cv2
 import numpy as np
 from flask import Flask, jsonify, request, send_from_directory
+
+# Startup diagnostic — printed before any imports so Render logs show it.
+print(f"Python {sys.version}", flush=True)
+print(f"YOLO_MODEL_PATH={os.environ.get('YOLO_MODEL_PATH', 'NOT SET')}", flush=True)
+print(f"Working dir: {os.getcwd()}", flush=True)
+import pathlib
+print(f"ONNX file exists: {pathlib.Path(os.environ.get('YOLO_MODEL_PATH', 'yolo26n-sem.onnx')).is_file()}", flush=True)
 
 from navigation.config import load_settings
 from navigation.maps.router import geocode_address

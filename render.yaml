@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: smart-cane-ai
+    runtime: python
+    buildCommand: pip install -r requirements-cloud.txt
+    startCommand: gunicorn phone_server_cloud:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: YOLO_MODEL_PATH
+        value: yolo26n-sem.onnx
+      - key: TTS_ENABLED
+        value: "false"
+      - key: USE_LLM
+        value: "false"
+      - key: USE_CARE_HTTP
+        value: "false"
+      - key: COMMAND_COOLDOWN_SEC
+        value: "8.0"
+      - key: COMMAND_DWELL_FRAMES
+        value: "4"
+      - key: MIN_SPEECH_GAP_SEC
+        value: "3.0"
+      - key: STOP_HOLD_FRAMES
+        value: "8"
+      - key: HAZARD_OBSTACLE_RATIO
+        value: "0.10"
+      - key: ALERTS_ENABLED
+        value: "true"
+      - key: ALERT_MIN_WEIGHTED_PIXELS
+        value: "1500.0"
+      - key: ALERT_MAX_SIMULTANEOUS_CATEGORIES
+        value: "2"

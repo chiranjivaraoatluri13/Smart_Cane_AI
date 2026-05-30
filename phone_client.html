@@ -62,11 +62,19 @@
             display: flex;
             gap: 8px;
             z-index: 10;
-            /* The parent #overlay has pointer-events: none so taps fall
-               through to the video; we explicitly re-enable here so the
-               input and Set button receive taps. Same trick used by the
-               status bar and the controls bar. */
             pointer-events: auto;
+        }
+
+        #dest-select {
+            flex: 1;
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: none;
+            font-size: 15px;
+            background: rgba(255, 255, 255, 0.95);
+            color: #111;
+            pointer-events: auto;
+            appearance: auto;
         }
 
         #dest-input {
@@ -78,6 +86,7 @@
             background: rgba(255, 255, 255, 0.95);
             color: #111;
             pointer-events: auto;
+            display: none;
         }
 
         #set-dest-btn {
@@ -90,6 +99,22 @@
             min-width: auto;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
             pointer-events: auto;
+        }
+
+        #route-status {
+            position: absolute;
+            top: calc(env(safe-area-inset-top, 10px) + 52px);
+            left: 10px;
+            right: 10px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.75);
+            color: #fff;
+            font-size: 13px;
+            text-align: center;
+            z-index: 10;
+            pointer-events: none;
+            display: none;
         }
         
         #status-bar.go {
@@ -218,9 +243,21 @@
             <video id="video" autoplay playsinline muted></video>
             <div id="overlay">
                 <div id="dest-bar">
-                    <input id="dest-input" type="text" placeholder="Destination (e.g. Empire State Building)" autocomplete="off">
-                    <button id="set-dest-btn" type="button">Set</button>
+                    <select id="dest-select" onchange="onDestSelectChange()">
+                        <option value="">-- Pick a destination --</option>
+                        <option value="custom">Type an address...</option>
+                        <optgroup label="Common destinations">
+                            <option value="Trader Joe's Tempe AZ">Trader Joe's Tempe AZ</option>
+                            <option value="Walmart Tempe AZ">Walmart Tempe AZ</option>
+                            <option value="Starbucks Tempe AZ">Starbucks Tempe AZ</option>
+                            <option value="ASU Tempe Campus AZ">ASU Tempe Campus AZ</option>
+                            <option value="Tempe Marketplace AZ">Tempe Marketplace AZ</option>
+                        </optgroup>
+                    </select>
+                    <input id="dest-input" type="text" placeholder="Type address..." autocomplete="off">
+                    <button id="set-dest-btn" type="button">Go</button>
                 </div>
+                <div id="route-status"></div>
                 <div id="status-bar" class="idle" onclick="toggleNavigation()">
                     <div id="command">Ready</div>
                     <div id="details">Tap anywhere to start navigation</div>
@@ -297,27 +334,57 @@
 
         // Set destination — geocodes via /set_destination and arms map mode.
         async function setDestination() {
+            const select = document.getElementById('dest-select');
             const input = document.getElementById('dest-input');
-            const address = input.value.trim();
-            if (!address) {
-                dbg('destination empty');
-                return;
+            const routeStatus = document.getElementById('route-status');
+
+            let address = '';
+            if (select && (select.value === 'custom' || select.value === '')) {
+                address = input ? input.value.trim() : '';
+            } else if (select && select.value) {
+                address = select.value;
+            } else {
+                address = input ? input.value.trim() : '';
             }
+
+            if (!address) { dbg('destination empty'); return; }
+
+            routeStatus.style.display = 'block';
+            routeStatus.style.background = 'rgba(0,0,0,0.75)';
+            routeStatus.textContent = '🔍 Finding ' + address + '...';
+
             const body = new URLSearchParams({ address });
             try {
-                const r = await fetch(SERVER_URL + '/set_destination', {
-                    method: 'POST',
-                    body,
-                });
+                const r = await fetch(SERVER_URL + '/set_destination', { method: 'POST', body });
                 const j = await r.json();
                 if (j.ok) {
-                    dbg('destination set:', j.address, '→',
-                        j.lat.toFixed(4) + ',' + j.lon.toFixed(4));
+                    routeStatus.style.background = 'rgba(0,120,0,0.85)';
+                    routeStatus.textContent = '✓ Navigating to ' + address;
+                    dbg('destination set:', address, '→', j.lat.toFixed(4) + ',' + j.lon.toFixed(4));
+                    setTimeout(() => { routeStatus.style.display = 'none'; }, 4000);
                 } else {
+                    routeStatus.style.background = 'rgba(180,0,0,0.85)';
+                    routeStatus.textContent = '✗ Not found: ' + address;
                     dbg('destination error:', j.error);
                 }
             } catch (e) {
+                routeStatus.style.background = 'rgba(180,0,0,0.85)';
+                routeStatus.textContent = '✗ Connection error';
                 dbg('destination request failed:', e.message);
+            }
+        }
+
+        function onDestSelectChange() {
+            const select = document.getElementById('dest-select');
+            const input = document.getElementById('dest-input');
+            if (select.value === 'custom') {
+                input.style.display = 'block';
+                select.style.flex = '0 0 120px';
+                input.focus();
+            } else {
+                input.style.display = 'none';
+                select.style.flex = '1';
+                if (select.value) setDestination();
             }
         }
         

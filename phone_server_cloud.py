@@ -1,20 +1,19 @@
 """
 Cloud-deployable phone server — uses ONNX runtime instead of PyTorch.
 
-This is the same pipeline as phone_server.py but:
-- Uses onnxruntime for YOLO inference (~50MB) instead of torch (~800MB)
-- Designed for Railway / Render / any Python cloud host
-- No GPU required — CPU inference at ~100-200ms per frame
+No torch, no ultralytics. Only onnxruntime (~50MB) for inference.
+Designed for Render / Railway free tier.
 
-Deploy to Railway:
-  1. Push this repo to GitHub (including yolo26n-sem.onnx)
-  2. Create a new Railway project from the repo
-  3. Railway auto-detects Procfile and deploys
-  4. Your public URL is shown in the Railway dashboard
+Required files in repo:
+  yolo26n-sem.onnx   (export with: python scripts/export_onnx.py)
+  config/default.yaml
+  config/phrases.yaml
+  navigation/  (full package)
+  phone_client.html
 
-Environment variables to set in Railway dashboard:
+Environment variables to set in Render dashboard:
   YOLO_MODEL_PATH=yolo26n-sem.onnx
-  TTS_ENABLED=false          (no audio on server — phone speaks)
+  TTS_ENABLED=false
   USE_LLM=false
   USE_CARE_HTTP=false
   COMMAND_COOLDOWN_SEC=8.0
@@ -27,6 +26,8 @@ Environment variables to set in Railway dashboard:
   ALERT_MAX_SIMULTANEOUS_CATEGORIES=2
 """
 
+from __future__ import annotations
+
 import os
 import threading
 import time
@@ -35,33 +36,42 @@ import cv2
 import numpy as np
 from flask import Flask, jsonify, request, send_from_directory
 
-# ---------------------------------------------------------------------------
-# Lazy imports — only load what's available in the cloud environment.
-# ---------------------------------------------------------------------------
 from navigation.config import load_settings
 from navigation.maps.router import geocode_address
 from navigation.models import Position
 from navigation.output.validator import CommandValidator
-from navigation.pipeline.runner import _build_pipeline_components, process_frame
+from navigation.output.voice_queue import VoiceQueue
+from navigation.perception.depth import UniDepthEstimator
+from navigation.perception.segmentation_onnx import OnnxSegmenter
+from navigation.perception.stairs import StairsDetector
+from navigation.output.tts import SpeechEngine
+from navigation.reasoning.alerts import AlertTracker
+from navigation.reasoning.care import CareNavigator
+from navigation.reasoning.composer import PhraseComposer
+from navigation.reasoning.llm import NavigationInterpreter
+from navigation.reasoning.spatial_reasoner import SpatialReasoner
+from navigation.reasoning.trend import TrendTracker
+from navigation.pipeline.runner import process_frame, _resolve_route_cue
 
 app = Flask(__name__)
 
-print("Loading navigation models (cloud mode)...")
+print("Loading navigation models (cloud/ONNX mode)...")
 settings = load_settings()
-(
-    segmenter,
-    depth_est,
-    care,
-    interpreter,
-    validator,
-    tts,
-    alert_tracker,
-    spatial_reasoner,
-    composer,
-    voice_queue,
-    trend_tracker,
-    stairs_detector,
-) = _build_pipeline_components(settings)
+
+# Use the ONNX segmenter — no torch required.
+segmenter = OnnxSegmenter(settings)
+depth_est = UniDepthEstimator(settings)
+care = CareNavigator(settings)
+interpreter = NavigationInterpreter(settings)
+validator = CommandValidator(settings)
+tts = SpeechEngine(settings)
+alert_tracker = AlertTracker.from_settings(settings)
+spatial_reasoner = SpatialReasoner(settings)
+composer = PhraseComposer(settings)
+voice_queue = VoiceQueue(settings)
+trend_tracker = TrendTracker(settings)
+stairs_detector = StairsDetector(settings)
+
 print("Models loaded! Cloud server ready.")
 
 frame_id = 0

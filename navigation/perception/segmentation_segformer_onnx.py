@@ -46,20 +46,20 @@ logger = logging.getLogger(__name__)
 # inference time — just numpy + cv2.
 _MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-_INPUT_SIZE = 512  # SegFormer ADE20K models expect 512×512 input
+_INPUT_SIZE = 512  # SegFormer ADE20K models expect 512×512 input (can be overridden)
 
 
-def _preprocess(frame_bgr: np.ndarray) -> np.ndarray:
+def _preprocess(frame_bgr: np.ndarray, input_size: int = _INPUT_SIZE) -> np.ndarray:
     """BGR frame → normalised NCHW float32 tensor (numpy).
 
     Replicates SegformerImageProcessor:
       1. BGR → RGB
-      2. Resize to 512×512 (bilinear)
+      2. Resize to input_size×input_size (bilinear)
       3. Normalise with ImageNet mean/std
       4. HWC → NCHW, add batch dim
     """
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    resized = cv2.resize(rgb, (_INPUT_SIZE, _INPUT_SIZE),
+    resized = cv2.resize(rgb, (input_size, input_size),
                          interpolation=cv2.INTER_LINEAR)
     img = resized.astype(np.float32) / 255.0
     img = (img - _MEAN) / _STD
@@ -170,12 +170,17 @@ class SegformerOnnxSegmenter:
         session = self._load()
         display_h, display_w = frame.shape[:2]
 
+        # Get inference size from settings (default 512, can be reduced to 256/384 for speed)
+        inference_imgsz = int(getattr(self.settings, "inference_imgsz", 0))
+        if inference_imgsz <= 0:
+            inference_imgsz = _INPUT_SIZE
+        
         # Preprocess: BGR → normalised NCHW float32
-        pixel_values = _preprocess(frame)
+        pixel_values = _preprocess(frame, input_size=inference_imgsz)
 
         # Run ONNX inference
         logits = session.run(None, {"pixel_values": pixel_values})[0]
-        # logits: (1, num_classes, H/4, W/4)  e.g. (1, 150, 128, 128)
+        # logits: (1, num_classes, H/4, W/4)  e.g. (1, 150, 128, 128) for 512x512 input
         logits = logits[0]  # (num_classes, H/4, W/4)
 
         # Upsample to display resolution using cv2 (no torch needed).
@@ -191,6 +196,7 @@ class SegformerOnnxSegmenter:
         # Tag the backend so the JSON record is accurate.
         meta = dict(seg.metadata)
         meta["backend"] = "segformer_onnx"
+        meta["inference_imgsz"] = inference_imgsz
         seg = seg.model_copy(update={"metadata": meta})
         self._last_segmentation = seg
         return seg

@@ -35,7 +35,7 @@ services:
       - key: HAZARD_OBSTACLE_RATIO
         value: "0.20"
       - key: ALERTS_ENABLED
-        value: "true"
+        value: "false"
       - key: ALERT_MIN_WEIGHTED_PIXELS
         value: "1500.0"
       - key: ALERT_MAX_SIMULTANEOUS_CATEGORIES

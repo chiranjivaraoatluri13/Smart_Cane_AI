@@ -33,7 +33,7 @@ services:
       - key: STOP_HOLD_FRAMES
         value: "8"
       - key: HAZARD_OBSTACLE_RATIO
-        value: "0.10"
+        value: "0.20"
       - key: ALERTS_ENABLED
         value: "true"
       - key: ALERT_MIN_WEIGHTED_PIXELS

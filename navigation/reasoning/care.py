@@ -50,7 +50,9 @@ class CareNavigator:
         # does not.
         ratio = self.settings.hazard_obstacle_ratio
         if weighted > 0:
-            min_obstacle = frame_area * ratio * 0.5
+            # For weighted obstacles, use a higher threshold (2x) to reduce false positives
+            # on plain footpaths where the model might detect minor artifacts
+            min_obstacle = frame_area * ratio * 1.0  # Changed from 0.5 to 1.0
         else:
             min_obstacle = frame_area * ratio
         hazard = obstacle_score >= max(min_obstacle, 1.0)

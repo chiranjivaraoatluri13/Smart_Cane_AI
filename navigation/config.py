@@ -89,13 +89,10 @@ class Settings(BaseSettings):
 
     # Spatial-aware natural-language guidance — defaults from
     # config/default.yaml's spatial: / voice: blocks. These are surfaced as
-    # Settings fields so downstream components (StairsDetector, VoiceQueue,
+    # Settings fields so downstream components (VoiceQueue,
     # PhraseComposer, SpatialReasoner) don't have to re-parse YAML on the
     # hot path. Real values come from yaml_config() at startup.
     min_lane_walkable_ratio: float = 0.10
-    stairs_detector_enabled: bool = True
-    stairs_min_edge_density: float = 0.08
-    stairs_min_confidence: float = 0.4
     status_update_interval_sec: float = 10.0
     voice_cooldowns: dict[str, float] = Field(
         default_factory=lambda: {

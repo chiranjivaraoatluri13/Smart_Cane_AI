@@ -23,7 +23,6 @@ from navigation.reasoning.alerts import AlertTracker
 from navigation.output.validator import CommandValidator
 from navigation.output.voice_queue import VoiceQueue
 from navigation.reasoning.trend import TrendTracker
-from navigation.perception.stairs import StairsDetector
 from navigation.reasoning.llm import NavigationInterpreter
 from navigation.output.tts import SpeechEngine
 from navigation.pipeline.runner import process_frame
@@ -54,7 +53,6 @@ def quick_analyze(video_path, max_frames=100):
     tts = SpeechEngine(settings)
     voice_queue = VoiceQueue(settings)
     trend_tracker = TrendTracker(settings)
-    stairs_detector = StairsDetector(settings)
     interpreter = NavigationInterpreter(settings)
     
     # Open video
@@ -105,7 +103,6 @@ def quick_analyze(video_path, max_frames=100):
                 composer=composer,
                 voice_queue=voice_queue,
                 trend_tracker=trend_tracker,
-                stairs_detector=stairs_detector,
                 position=None,
                 client_depth_m=None,
             )

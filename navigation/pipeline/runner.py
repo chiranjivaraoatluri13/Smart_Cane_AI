@@ -20,7 +20,6 @@ from navigation.output.validator import CommandValidator
 from navigation.output.voice_queue import VoiceQueue
 from navigation.perception.depth import DepthEstimator
 from navigation.perception.segmentation_base import build_segmenter
-from navigation.perception.stairs import StairsDetector
 from navigation.perception.visualize import (
     close_windows,
     render_overlay,
@@ -194,7 +193,6 @@ def process_frame(
     composer: PhraseComposer | None = None,
     voice_queue: VoiceQueue | None = None,
     trend_tracker: TrendTracker | None = None,
-    stairs_detector: StairsDetector | None = None,
     use_legacy_reasoner: bool = False,
     position: Position | None = None,
     client_depth_m: float | None = None,
@@ -245,14 +243,8 @@ def process_frame(
         spoken = phrase
     else:
         # ----- Spatial path (new).
-        t0 = _t() if bench else 0.0
-        stairs = (
-            stairs_detector.detect(frame, seg)
-            if stairs_detector is not None
-            else _no_stairs()
-        )
-        if bench:
-            timings["stairs"] = (_t() - t0) * 1000
+        # Stairs detection — SegFormer detects stairs/step as hazard classes
+        stairs = _no_stairs()
 
         t0 = _t() if bench else 0.0
         if trend_tracker is not None:
@@ -410,7 +402,6 @@ def _build_pipeline_components(
     PhraseComposer,
     VoiceQueue,
     TrendTracker,
-    StairsDetector,
 ]:
     """Construct one of every component the pipeline needs.
 
@@ -428,7 +419,6 @@ def _build_pipeline_components(
     composer = PhraseComposer(settings)
     voice_queue = VoiceQueue(settings)
     trend = TrendTracker(settings)
-    stairs = StairsDetector(settings)
     alert_tracker = AlertTracker.from_settings(settings)
     return (
         segmenter,
@@ -442,7 +432,6 @@ def _build_pipeline_components(
         composer,
         voice_queue,
         trend,
-        stairs,
     )
 
 

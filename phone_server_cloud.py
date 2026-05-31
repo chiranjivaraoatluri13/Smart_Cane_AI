@@ -61,7 +61,6 @@ from navigation.output.validator import CommandValidator
 from navigation.output.voice_queue import VoiceQueue
 from navigation.perception.depth import UniDepthEstimator
 from navigation.perception.segmentation_base import build_segmenter
-from navigation.perception.stairs import StairsDetector
 from navigation.output.tts import SpeechEngine
 from navigation.reasoning.alerts import AlertTracker
 from navigation.reasoning.care import CareNavigator
@@ -88,7 +87,6 @@ spatial_reasoner = SpatialReasoner(settings)
 composer = PhraseComposer(settings)
 voice_queue = VoiceQueue(settings)
 trend_tracker = TrendTracker(settings)
-stairs_detector = StairsDetector(settings)
 
 print("Models loaded! Cloud server ready.")
 
@@ -195,7 +193,6 @@ def process_frame_endpoint():
                 composer=composer,
                 voice_queue=voice_queue,
                 trend_tracker=trend_tracker,
-                stairs_detector=stairs_detector,
                 position=position,
                 client_depth_m=client_depth_m,
             )

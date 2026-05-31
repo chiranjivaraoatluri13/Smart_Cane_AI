@@ -21,9 +21,9 @@
 │  │              PERCEPTION LAYER                            │  │
 │  │  ┌─────────────────────────────────────────────────────┐ │  │
 │  │  │ Segmentation (ADE20K SegFormer-B0 ONNX INT8)       │ │  │
-│  │  │ - Input: 512×512 RGB frame                         │ │  │
+│  │  │ - Input: dynamic NxN RGB (INFERENCE_IMGSZ, 256 prod)│ │  │
 │  │  │ - Output: 150-class semantic map                   │ │  │
-│  │  │ - Latency: ~230ms (83% of total)                   │ │  │
+│  │  │ - Latency: ~94ms @256 (~50ms model on cloud CPU)   │ │  │
 │  │  │ - Classes: walkable, obstacles, hazards            │ │  │
 │  │  └─────────────────────────────────────────────────────┘ │  │
 │  │                                                           │  │
@@ -371,22 +371,24 @@ phrases:
 
 ## Latency Breakdown (Current)
 
-```
-Total: 334ms (3 FPS)
+Cloud profile (`INFERENCE_IMGSZ=256`, depth skipped, alerts disabled), per
+*processed* frame. The 512×512 model input was never architecturally required —
+the ONNX graph has dynamic H/W axes, so dropping to 256 is the single biggest
+lever and is already the production default.
 
-Segmentation:    277ms (83%) ← BOTTLENECK
-Depth:            28ms (8%)
-Stairs:           15ms (4%)
-Alerts:            9ms (3%)
-Reasoning:         5ms (1%)
-Other:             0ms (1%)
+```
+Segmentation (model):   ~50ms  ← dominant
+Preprocess (resize/norm): ~2ms
+Postprocess (analysis):  ~6ms  (was ~22ms before native-resolution analysis)
+Reasoning + composer:    ~3ms
 ```
 
 **Optimization Strategy:**
-1. Frame skipping (10) → 33ms
-2. Disable stairs/alerts → 20ms
-3. Skip depth estimation → 15ms
-4. **Target:** 15-30ms (33-66 FPS)
+1. INFERENCE_IMGSZ=256 (dynamic ONNX input) — done, biggest win
+2. Analyze segmentation at native 64×64 logit resolution — done
+3. Vectorize postprocessing with `np.bincount` — done
+4. Frame skipping (`PROCESS_EVERY_N_FRAMES`) for display smoothness
+5. Further: INFERENCE_IMGSZ=192 (~60ms) or a smaller model if needed
 
 ---
 

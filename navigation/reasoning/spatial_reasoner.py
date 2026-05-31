@@ -2,9 +2,8 @@
 into a single NavigationDecision plus the GuidanceFacts the composer needs.
 
 Vision-STOP short-circuit (Requirement 13) is structurally enforced: the
-`vision_stop` flag is computed first and clears `route_cue` from the
-emitted facts, so no downstream code can accidentally pair STOP with a
-turn instruction.
+`vision_stop` flag is computed first; the composer prioritises it for speech.
+`route_cue` remains in facts for HUD turn display even during vision STOP.
 """
 
 from __future__ import annotations
@@ -15,8 +14,10 @@ from navigation.config import Settings
 from navigation.maps.guidance import MapGuidance
 from navigation.maps.router import (
     bearing_delta_deg,
-    bearing_to_next_waypoint,
+    cross_track_distance_m,
     distance_to_destination,
+    next_waypoint_ahead,
+    side_of_route,
 )
 from navigation.models import (
     CareResult,
@@ -54,35 +55,60 @@ def _next_route_cue(
         map_guidance is None
         or current_lat is None
         or current_lon is None
-        or heading_deg is None
     ):
         return None
 
     route = map_guidance.route
     dest_dist = distance_to_destination(current_lat, current_lon, route)
+
+    cross = cross_track_distance_m(current_lat, current_lon, route)
+    if cross > settings.route_off_route_m:
+        side = side_of_route(current_lat, current_lon, route)
+        turn = "left" if side >= 0 else "right"
+        return RouteCue(
+            turn=turn,
+            meters_to_turn=cross,
+            target_bearing_deg=0.0,
+            rationale=f"off_route: {cross:.0f} m — rejoin {turn}",
+        )
+
     if dest_dist <= settings.route_at_dest_m:
         return RouteCue(
             turn="stop",
             meters_to_turn=dest_dist,
-            target_bearing_deg=heading_deg,
+            target_bearing_deg=heading_deg or 0.0,
             rationale=f"At destination ({dest_dist:.0f} m)",
         )
 
-    target_bearing = bearing_to_next_waypoint(current_lat, current_lon, route)
-    delta = bearing_delta_deg(target_bearing, heading_deg)
+    _, dist_to_next, target_bearing = next_waypoint_ahead(
+        current_lat, current_lon, route
+    )
+    effective_heading = heading_deg
+    if effective_heading is None:
+        effective_heading = settings.current_heading_deg
+    if effective_heading is None:
+        effective_heading = target_bearing
+
+    delta = bearing_delta_deg(target_bearing, effective_heading)
     if abs(delta) <= settings.route_bearing_align_deg:
         turn = "forward"
     elif delta < 0:
         turn = "left"
     else:
         turn = "right"
+    if turn in ("left", "right"):
+        cue_dist = dist_to_next
+    elif dist_to_next <= 80.0:
+        cue_dist = dist_to_next
+    else:
+        cue_dist = dest_dist
     return RouteCue(
         turn=turn,
-        meters_to_turn=dest_dist,
+        meters_to_turn=cue_dist,
         target_bearing_deg=target_bearing,
         rationale=(
             f"target {target_bearing:.0f}° "
-            f"vs heading {heading_deg:.0f}° (delta {delta:+.0f}°)"
+            f"vs heading {effective_heading:.0f}° (delta {delta:+.0f}°)"
         ),
     )
 
@@ -151,21 +177,38 @@ class SpatialReasoner:
             command = NavigationCommand.STOP
             confidence = 0.95  # At destination — very confident in STOP
             rationale = f"At destination ({route_cue.meters_to_turn:.0f} m)"
+        elif route_cue is not None and route_cue.turn == "loading":
+            command = NavigationCommand.GO_FORWARD
+            confidence = 0.75
+            rationale = "route loading"
+        elif route_cue is not None and route_cue.turn == "forward":
+            command = NavigationCommand.GO_FORWARD
+            confidence = 0.85
+            rationale = f"on route ({route_cue.meters_to_turn:.0f} m remaining)"
         elif route_cue is not None and route_cue.turn in ("left", "right"):
             target_side: Side = "left" if route_cue.turn == "left" else "right"
             target_walkable = walkable_by_side.get(target_side, 0.0)
             center_walkable = walkable_by_side.get("center", 0.0)
-            if target_walkable >= max(center_walkable, self._min_lane_walkable):
+            off_route = route_cue.rationale.startswith("off_route")
+            map_near = route_cue.meters_to_turn <= 45.0
+            min_walk = self._min_lane_walkable * (0.35 if (off_route or map_near) else 1.0)
+            if off_route or target_walkable >= max(
+                center_walkable * 0.45, min_walk
+            ):
                 command = (
                     NavigationCommand.MOVE_LEFT
                     if target_side == "left"
                     else NavigationCommand.MOVE_RIGHT
                 )
-                confidence = 0.85  # High confidence in turn direction
-                rationale = f"map cue: turn {target_side}, target side walkable"
+                confidence = 0.85
+                rationale = (
+                    f"map cue: rejoin route {target_side}"
+                    if off_route
+                    else f"map cue: turn {target_side}"
+                )
             else:
                 command = NavigationCommand.SLOW_DOWN
-                confidence = 0.70  # Moderate confidence — path unclear
+                confidence = 0.70
                 rationale = (
                     f"map says turn {target_side} but {target_side} "
                     f"walkable {target_walkable:.2f} < center {center_walkable:.2f}"
@@ -198,11 +241,14 @@ class SpatialReasoner:
                 confidence = care_score  # High safety = high confidence in movement
             rationale = f"CARE direction {deg:.1f}° gated by per-side walkable (safety {care_score:.2f})"
 
-        # Confidence threshold enforcement: if confidence < 0.75, must STOP
-        # This ensures we only walk when we're confident (>= 0.75)
-        if confidence < 0.75 and command != NavigationCommand.STOP:
+        # Map-aligned movement should not be downgraded to STOP by the generic
+        # confidence gate — only vision/CARE hazards should halt walking.
+        map_active = route_cue is not None and route_cue.turn in (
+            "forward", "left", "right", "loading"
+        )
+        if confidence < 0.75 and command != NavigationCommand.STOP and not map_active:
             command = NavigationCommand.STOP
-            confidence = 1.0 - confidence  # Invert: low confidence = high confidence in STOP
+            confidence = 1.0 - confidence
             rationale = f"Confidence {confidence:.2f} below 0.75 threshold — safety priority"
         
         decision = NavigationDecision(
@@ -218,9 +264,9 @@ class SpatialReasoner:
             stairs=stairs,
             distance_bucket=bucket,
             distance_phrase=distance_phrase,
-            # Req 7.3 / 13.3 — vision STOP drops the route cue entirely so
-            # the composer cannot pair STOP with a turn instruction.
-            route_cue=None if vision_stop else route_cue,
+            # Keep route_cue for HUD / upcoming-turn display. The composer
+            # still prioritises vision_stop for spoken phrases (Req 13).
+            route_cue=route_cue,
             vision_stop=vision_stop,
         )
         return decision, facts

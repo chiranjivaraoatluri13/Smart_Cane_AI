@@ -46,6 +46,20 @@ class Settings(BaseSettings):
     # Path to the exported ONNX model (used when segmenter_backend=segformer_onnx).
     # Export with: python scripts/export_segformer_onnx.py
     segformer_onnx_path: str = "segformer_b0_ade20k_int8.onnx"
+    # onnxruntime intra-op thread count for the segmenter session.
+    #   0 = auto (capped — see below). Set this to the number of vCPUs the host
+    #   actually allocates (e.g. 1 on Render Standard, 2 on Pro). Leaving ORT to
+    #   use "all cores" is a trap in containers: ORT reads the *host's* physical
+    #   core count, not the cgroup limit, and oversubscribing a 1-vCPU container
+    #   makes the INT8 model ~5× slower (dynamic-quant ops scale poorly across
+    #   threads). Match this to the allocated CPU and inference stays fast.
+    onnx_intra_op_threads: int = 0
+    # When False, keep ``class_map`` at the model's native logit resolution
+    # (e.g. 48×48 for a 192px input) instead of upscaling to the camera frame.
+    # Safe on the cloud phone path where alerts are off, depth is skipped, and
+    # no segmentation overlay is rendered — reasoning uses the per-side stats
+    # computed at native resolution. Laptop preview keeps the default True.
+    seg_upscale_class_map: bool = True
 
     unidepth_model_path: str = ""
     unidepth_device: str = "auto"
@@ -112,10 +126,13 @@ class Settings(BaseSettings):
     dest_lon: float | None = None
     current_lat: float | None = None
     current_lon: float | None = None
-    current_heading_deg: float = 0.0
+    current_heading_deg: float | None = None
     route_at_dest_m: float = 15.0
     route_off_route_m: float = 30.0
-    route_bearing_align_deg: float = 25.0
+    route_refetch_off_route_m: float = 45.0
+    route_bearing_align_deg: float = 15.0
+    # OSRM foot-routing endpoint (override via OSRM_BASE_URL env).
+    osrm_base_url: str = ""
     route_debug_path: str = "output/route.json"
 
     tts_enabled: bool = True
@@ -159,6 +176,26 @@ class Settings(BaseSettings):
 
 def load_settings() -> Settings:
     return Settings()
+
+
+def apply_cloud_profile(settings: Settings) -> Settings:
+    """Low-latency defaults for the phone-server / Render deployment.
+
+    Does not override explicit ``.env`` / platform env values — only fills
+    in unset knobs and applies cloud-safe choices (no display-resolution
+    class-map upscale; TTS/LLM off).
+    """
+    updates: dict[str, object] = {
+        "seg_upscale_class_map": False,
+        "tts_enabled": False,
+        "use_llm": False,
+        "use_care_http": False,
+    }
+    if int(settings.inference_imgsz or 0) <= 0:
+        updates["inference_imgsz"] = 192
+    if int(getattr(settings, "onnx_intra_op_threads", 0) or 0) <= 0:
+        updates["onnx_intra_op_threads"] = 1
+    return settings.model_copy(update=updates)
 
 
 def apply_fast_profile(settings: Settings) -> Settings:

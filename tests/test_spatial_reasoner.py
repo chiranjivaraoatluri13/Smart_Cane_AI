@@ -74,7 +74,7 @@ _ROUTE_CUE_CHOICES = st.one_of(
 def test_vision_stop_overrides_all(
     hazard, route_cue, walk_left, walk_center, walk_right, safety_score, safe_dir
 ):
-    """When CARE flags hazard, decision is STOP and route_cue is dropped."""
+    """When CARE flags hazard, decision is STOP; route_cue may remain for HUD."""
     if not hazard:
         return  # only assert on the hazard branch
     reasoner = SpatialReasoner(_settings())
@@ -89,7 +89,9 @@ def test_vision_stop_overrides_all(
     )
     assert decision.command == NavigationCommand.STOP
     assert facts.vision_stop is True
-    assert facts.route_cue is None
+    # route_cue kept for on-screen turn info; composer still picks vision_stop.
+    if route_cue is not None:
+        assert facts.route_cue == route_cue
 
 
 # Feature: spatial-aware-natural-language-guidance, Property 3: directional move only when target walkable
@@ -184,7 +186,7 @@ def test_vision_stop_drops_route():
     cue = RouteCue(turn="left", meters_to_turn=10.0, target_bearing_deg=270.0)
     decision, facts = reasoner.decide(seg, DepthResult(), care, cue, stairs=_no_stairs())
     assert decision.command == NavigationCommand.STOP
-    assert facts.route_cue is None
+    assert facts.route_cue == cue
 
 
 def test_slow_down_when_no_lane_walkable():

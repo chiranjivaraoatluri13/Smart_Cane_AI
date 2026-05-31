@@ -64,6 +64,15 @@ map_turn_with_caution:
   - "Slow down. {turn_direction_cap} turn ahead, but the {turn_direction} side is blocked."
   - "Hold for the {category} before taking the {turn_direction}."
 
+map_off_route:
+  - "You're off the route. Step to your {turn_direction}."
+  - "Move toward your {turn_direction} to get back on the path."
+  - "Off route — take a few steps to your {turn_direction}."
+
+map_route_loading:
+  - "Loading walking directions."
+  - "Fetching your route, one moment."
+
 status_update_clear:
   - "Path is clear, take a few steps forward."
   - "Open sidewalk ahead. Keep walking."

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Camera Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #000;
+            color: #fff;
+        }
+        #video {
+            width: 100%;
+            max-width: 640px;
+            border: 2px solid #0f0;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 10px;
+            background: #222;
+            border-radius: 5px;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            margin: 10px;
+            cursor: pointer;
+        }
+        .success { color: #0f0; }
+        .error { color: #f00; }
+        .info { color: #ff0; }
+    </style>
+</head>
+<body>
+    <h1>Camera Diagnostic Test</h1>
+    
+    <div id="status">
+        <div>🔍 Checking camera access...</div>
+    </div>
+    
+    <video id="video" autoplay playsinline muted></video>
+    
+    <div>
+        <button onclick="testCamera()">Test Camera</button>
+        <button onclick="testServer()">Test Server</button>
+        <button onclick="sendFrame()">Send Test Frame</button>
+    </div>
+    
+    <div id="log" style="margin-top: 20px; font-family: monospace; font-size: 12px;"></div>
+    
+    <script>
+        const video = document.getElementById('video');
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+        
+        function log(msg, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const color = type === 'success' ? '#0f0' : type === 'error' ? '#f00' : '#ff0';
+            logDiv.innerHTML += `<div style="color: ${color}">[${time}] ${msg}</div>`;
+            console.log(msg);
+        }
+        
+        async function testCamera() {
+            log('🎥 Requesting camera access...', 'info');
+            statusDiv.innerHTML = '<div class="info">🎥 Requesting camera...</div>';
+            
+            try {
+                // Check if mediaDevices is available
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new Error('Camera API not available. Are you using HTTPS or localhost?');
+                }
+                
+                log('✓ Camera API available', 'success');
+                log('isSecureContext: ' + window.isSecureContext, 'info');
+                
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'user', // Use front camera for laptop testing
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                });
+                
+                video.srcObject = stream;
+                
+                // Wait for video to be ready
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        log('✓ Video metadata loaded', 'success');
+                        resolve();
+                    };
+                });
+                
+                await video.play();
+                
+                log('✓ Camera started successfully!', 'success');
+                log(`Video dimensions: ${video.videoWidth}x${video.videoHeight}`, 'info');
+                statusDiv.innerHTML = '<div class="success">✓ Camera working!</div>';
+                
+            } catch (error) {
+                log('✗ Camera error: ' + error.message, 'error');
+                statusDiv.innerHTML = `<div class="error">✗ Camera failed: ${error.message}</div>`;
+                console.error('Camera error:', error);
+            }
+        }
+        
+        async function testServer() {
+            log('🌐 Testing server connection...', 'info');
+            
+            try {
+                const response = await fetch('http://localhost:5000/health');
+                const data = await response.json();
+                
+                if (data.status === 'ok') {
+                    log('✓ Server is reachable!', 'success');
+                    log('Server data: ' + JSON.stringify(data), 'info');
+                    statusDiv.innerHTML = '<div class="success">✓ Server connected!</div>';
+                } else {
+                    log('✗ Server returned unexpected status', 'error');
+                }
+            } catch (error) {
+                log('✗ Server connection failed: ' + error.message, 'error');
+                statusDiv.innerHTML = `<div class="error">✗ Server unreachable</div>`;
+            }
+        }
+        
+        async function sendFrame() {
+            log('📸 Capturing and sending frame...', 'info');
+            
+            if (!video.videoWidth || !video.videoHeight) {
+                log('✗ Video not ready. Click "Test Camera" first!', 'error');
+                return;
+            }
+            
+            try {
+                // Capture frame
+                const canvas = document.createElement('canvas');
+                canvas.width = 320;
+                canvas.height = 240;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, 320, 240);
+                
+                log('✓ Frame captured to canvas', 'success');
+                
+                // Convert to blob
+                const blob = await new Promise(resolve => {
+                    canvas.toBlob(resolve, 'image/jpeg', 0.7);
+                });
+                
+                log(`✓ Blob created (${blob.size} bytes)`, 'success');
+                
+                // Send to server
+                const formData = new FormData();
+                formData.append('frame', blob, 'frame.jpg');
+                
+                const t0 = Date.now();
+                const response = await fetch('http://localhost:5000/process_frame', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const rtt = Date.now() - t0;
+                
+                if (!response.ok) {
+                    throw new Error('Server returned ' + response.status);
+                }
+                
+                const result = await response.json();
+                
+                log(`✓ Server response in ${rtt}ms`, 'success');
+                log(`Command: ${result.command}, Confidence: ${result.confidence}`, 'info');
+                log(`Phrase: "${result.phrase}"`, 'info');
+                log(`Processing time: ${result.processing_time_ms}ms`, 'info');
+                
+                statusDiv.innerHTML = `<div class="success">✓ Frame processed!<br>Command: ${result.command}<br>Latency: ${rtt}ms</div>`;
+                
+            } catch (error) {
+                log('✗ Frame send failed: ' + error.message, 'error');
+                statusDiv.innerHTML = `<div class="error">✗ Failed: ${error.message}</div>`;
+            }
+        }
+        
+        // Auto-test on load
+        window.onload = async () => {
+            log('🚀 Page loaded', 'info');
+            log('User agent: ' + navigator.userAgent, 'info');
+            
+            // Auto-test camera
+            setTimeout(() => testCamera(), 500);
+        };
+    </script>
+</body>
+</html>

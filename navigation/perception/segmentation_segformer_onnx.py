@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -53,15 +54,19 @@ def _preprocess(frame_bgr: np.ndarray, input_size: int = _INPUT_SIZE) -> np.ndar
     """BGR frame → normalised NCHW float32 tensor (numpy).
 
     Replicates SegformerImageProcessor:
-      1. BGR → RGB
-      2. Resize to input_size×input_size (bilinear)
+      1. Resize to input_size×input_size (bilinear)
+      2. BGR → RGB
       3. Normalise with ImageNet mean/std
       4. HWC → NCHW, add batch dim
+
+    Resize is done *before* the colour conversion so the BGR→RGB swap runs on
+    the small input_size×input_size image (e.g. 65k px) instead of the full
+    camera frame (e.g. 400k px) — same result, less work.
     """
-    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    resized = cv2.resize(rgb, (input_size, input_size),
-                         interpolation=cv2.INTER_LINEAR)
-    img = resized.astype(np.float32) / 255.0
+    resized_bgr = cv2.resize(frame_bgr, (input_size, input_size),
+                             interpolation=cv2.INTER_LINEAR)
+    rgb = cv2.cvtColor(resized_bgr, cv2.COLOR_BGR2RGB)
+    img = rgb.astype(np.float32) / 255.0
     img = (img - _MEAN) / _STD
     # HWC → CHW → NCHW
     return np.transpose(img, (2, 0, 1))[np.newaxis].astype(np.float32)
@@ -141,14 +146,26 @@ class SegformerOnnxSegmenter:
         self._parser._id_to_name = self._id_to_name
 
         opts = ort.SessionOptions()
-        # Use all available cores for intra-op parallelism (matrix multiplies).
+        # Intra-op threads (the matrix-multiply pool). Do NOT use "all cores"
+        # (0): in a container ORT reads the *host's* physical core count, not
+        # the cgroup CPU limit, so it oversubscribes a 1-vCPU box and the INT8
+        # model runs ~5× slower. Honour an explicit setting; otherwise cap the
+        # auto value so we never hit that oversubscription cliff.
+        intra = int(getattr(self.settings, "onnx_intra_op_threads", 0) or 0)
+        if intra <= 0:
+            intra = max(1, min(4, os.cpu_count() or 1))
+        opts.intra_op_num_threads = intra
         # Inter-op parallelism is kept at 1 because the pipeline is single-
         # threaded and spawning extra threads adds overhead.
-        opts.intra_op_num_threads = 0   # 0 = use all cores
         opts.inter_op_num_threads = 1
         opts.graph_optimization_level = (
             ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         )
+        # Single-threaded sessions run slightly faster in sequential mode
+        # (no thread-pool overhead between ops).
+        if intra == 1:
+            opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        logger.info("SegFormer ONNX intra_op_num_threads=%d", intra)
 
         self._session = ort.InferenceSession(
             str(model_path),
@@ -183,21 +200,39 @@ class SegformerOnnxSegmenter:
         # logits: (1, num_classes, H/4, W/4)  e.g. (1, 150, 128, 128) for 512x512 input
         logits = logits[0]  # (num_classes, H/4, W/4)
 
-        # Upsample to display resolution using cv2 (no torch needed).
-        # argmax first (cheaper to resize a single-channel map than 150 channels).
+        # Argmax at the model's native output stride (e.g. 64×64 for a 256px
+        # input). This small map is the segmenter's *actual* resolution —
+        # upscaling it to the camera frame before analysis adds no information,
+        # just work.
         class_map_small = np.argmax(logits, axis=0).astype(np.int32)
-        class_map = cv2.resize(
-            class_map_small.astype(np.float32),
-            (display_w, display_h),
-            interpolation=cv2.INTER_NEAREST,
-        ).astype(np.int32)
+        small_h, small_w = class_map_small.shape
 
-        seg = self._parser._parse_class_map(class_map, display_h, display_w)
-        # Tag the backend so the JSON record is accurate.
+        # Run the (scale-invariant) per-side / ratio analysis on the small map.
+        # Every reasoning consumer reads ratios or weighted counts paired with
+        # ``metadata["shape"]`` — all derived here at the same resolution — so
+        # the decisions are identical to analyzing the upscaled map while the
+        # postprocessing cost drops by the upscale factor squared.
+        seg = self._parser._parse_class_map(class_map_small, small_h, small_w)
+
+        upscale = bool(getattr(self.settings, "seg_upscale_class_map", True))
+        if upscale and (small_h, small_w) != (display_h, display_w):
+            class_map = cv2.resize(
+                class_map_small.astype(np.float32),
+                (display_w, display_h),
+                interpolation=cv2.INTER_NEAREST,
+            ).astype(np.int32)
+        else:
+            class_map = class_map_small
+
+        # Tag the backend so the JSON record is accurate. ``metadata["shape"]``
+        # stays at the analysis resolution (set by the parser) so the reasoner's
+        # ratio math remains self-consistent with the weighted counts above.
         meta = dict(seg.metadata)
         meta["backend"] = "segformer_onnx"
         meta["inference_imgsz"] = inference_imgsz
-        seg = seg.model_copy(update={"metadata": meta})
+        if upscale:
+            meta["display_shape"] = [display_h, display_w]
+        seg = seg.model_copy(update={"class_map": class_map, "metadata": meta})
         self._last_segmentation = seg
         return seg
 

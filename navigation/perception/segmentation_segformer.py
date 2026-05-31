@@ -176,18 +176,27 @@ class SegformerSegmenter:
         counts: dict[str, int] = {}
         present: list[str] = []
 
-        for cls_id in np.unique(class_map):
+        # Two vectorized passes replace the per-class mask/sum loop: ``bincount``
+        # tallies pixels and region-weighted mass for every class id in one C
+        # scan each. Iterating ``nonzero`` ids preserves the original ascending
+        # order (so name collisions resolve identically) while skipping the
+        # O(classes × pixels) boolean masking that dominated postprocessing.
+        flat = class_map.ravel()
+        length = int(flat.max()) + 1 if flat.size else 1
+        pixels_by_id = np.bincount(flat, minlength=length)
+        weighted_by_id = np.bincount(
+            flat, weights=weight_map.ravel(), minlength=length
+        )
+        for cls_id in np.nonzero(pixels_by_id)[0]:
             name = self._id_to_name.get(int(cls_id), str(int(cls_id)))
-            mask = class_map == cls_id
-            pixels = int(mask.sum())
+            pixels = int(pixels_by_id[cls_id])
             counts[name] = pixels
             if name in obstacle_set:
                 obstacle_pixels += pixels
-                obstacle_weighted += float(weight_map[mask].sum())
+                obstacle_weighted += float(weighted_by_id[cls_id])
             if name in walkable_set:
                 walkable_pixels += pixels
-            if pixels > 0:
-                present.append(name)
+            present.append(name)
 
         walkable_ratio = walkable_pixels / max(total, 1)
         per_side_pixels = _per_side_class_pixels(

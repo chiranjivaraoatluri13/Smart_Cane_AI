@@ -63,7 +63,7 @@ class RouteCue:
     naturally without inferring intent.
     """
 
-    turn: Literal["left", "right", "forward", "stop"]
+    turn: Literal["left", "right", "forward", "stop", "loading"]
     meters_to_turn: float
     target_bearing_deg: float
     rationale: str = ""

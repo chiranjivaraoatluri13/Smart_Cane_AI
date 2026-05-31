@@ -1,14 +1,10 @@
-# Cloud deployment requirements — ADE20K SegFormer via ONNX (fast CPU inference).
-# NOTE: onnxruntime is required for the ONNX backend. transformers is kept as
-# fallback when ONNX model is not available. The free 512MB tier is not
-# sufficient for this stack; use Standard (2GB) or higher.
+# Cloud deployment — ONNX-only inference (no torch/transformers).
+# The INT8 model (segformer_b0_ade20k_int8.onnx) must be in the repo.
+# Smaller image = faster cold starts on Render/Railway.
 flask>=3.0
 numpy>=1.26
 opencv-python-headless>=4.9
 onnxruntime>=1.18
-torch>=2.1
-transformers>=4.42
-pillow>=10.0
 pydantic>=2.5
 pydantic-settings>=2.1
 python-dotenv>=1.0

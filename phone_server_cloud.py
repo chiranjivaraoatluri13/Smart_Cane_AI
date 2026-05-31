@@ -54,8 +54,8 @@ print(f"Working dir: {os.getcwd()}", flush=True)
 print(f"sys.path[0]: {sys.path[0]}", flush=True)
 print(f"navigation package: {(_project_root / 'navigation' / '__init__.py').is_file()}", flush=True)
 
-from navigation.config import load_settings
-from navigation.maps.router import geocode_address
+from navigation.config import apply_cloud_profile, load_settings
+from navigation.maps.router import geocode_address, search_places
 from navigation.models import Position
 from navigation.output.validator import CommandValidator
 from navigation.output.voice_queue import VoiceQueue
@@ -67,22 +67,30 @@ from navigation.reasoning.composer import PhraseComposer
 from navigation.reasoning.llm import NavigationInterpreter
 from navigation.reasoning.spatial_reasoner import SpatialReasoner
 from navigation.reasoning.trend import TrendTracker
-from navigation.pipeline.runner import process_frame, _resolve_route_cue
+from navigation.pipeline.runner import process_frame, _resolve_route_cue, _warmup_segmenter
 
 app = Flask(__name__)
 
 print("Loading navigation models (cloud/ONNX mode)...")
-settings = load_settings()
+settings = apply_cloud_profile(load_settings())
+print(
+    f"Cloud profile: INFERENCE_IMGSZ={settings.inference_imgsz} "
+    f"ONNX_THREADS={settings.onnx_intra_op_threads} "
+    f"UPSCALE_MAP={settings.seg_upscale_class_map}",
+    flush=True,
+)
 
 # ADE20K SegFormer segmenter (indoor + outdoor, no closed-set hallucination).
 segmenter = build_segmenter(settings)
+_warmup_segmenter(segmenter, settings)
 # Skip depth estimation on cloud - use default "mid" distance
-# This saves 28ms per frame
 care = CareNavigator(settings)
 interpreter = NavigationInterpreter(settings)
 validator = CommandValidator(settings)
 tts = SpeechEngine(settings)
-alert_tracker = AlertTracker.from_settings(settings)
+alert_tracker = (
+    AlertTracker.from_settings(settings) if settings.alerts_enabled else None
+)
 spatial_reasoner = SpatialReasoner(settings)
 composer = PhraseComposer(settings)
 voice_queue = VoiceQueue(settings)
@@ -130,26 +138,53 @@ def health():
     return jsonify({"status": "ok", "models_loaded": True, "frame_count": frame_id})
 
 
+@app.route("/search_places", methods=["GET"])
+def search_places_endpoint():
+    """Proxy Nominatim — browsers cannot call it directly (CORS / User-Agent)."""
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify({"ok": True, "results": []}), 200
+    try:
+        rows = search_places(q, limit=5)
+        return jsonify({
+            "ok": True,
+            "results": [
+                {"display_name": p.display_name, "lat": p.lat, "lon": p.lon}
+                for p in rows
+            ],
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": "search_unavailable",
+            "detail": str(e),
+        }), 502
+
+
 @app.route("/set_destination", methods=["POST"])
 def set_destination():
     address = (request.form.get("address") or "").strip()
-    if not address:
+    dest_lat = _optional_float(request.form.get("lat"))
+    dest_lon = _optional_float(request.form.get("lon"))
+    if dest_lat is not None and dest_lon is not None:
+        lat, lon = dest_lat, dest_lon
+    elif address:
+        try:
+            lat, lon = geocode_address(address)
+        except ValueError:
+            return jsonify({"ok": False, "error": "address_not_found"}), 422
+        except Exception as e:
+            return jsonify({"ok": False, "error": "geocoder_unavailable", "detail": str(e)}), 502
+    else:
         return jsonify({"ok": False, "error": "missing_address"}), 400
-    try:
-        lat, lon = geocode_address(address)
-    except ValueError:
-        return jsonify({"ok": False, "error": "address_not_found"}), 422
-    except Exception as e:
-        return jsonify({"ok": False, "error": "geocoder_unavailable", "detail": str(e)}), 502
 
     with _pipeline_lock:
         interpreter.settings = interpreter.settings.model_copy(
             update={"dest_lat": lat, "dest_lon": lon, "use_map_guidance": True}
         )
-        interpreter._map_guidance = None
-        interpreter._map_route_attempted = False
+        interpreter.reset_map_state()
 
-    return jsonify({"ok": True, "lat": lat, "lon": lon, "address": address}), 200
+    return jsonify({"ok": True, "lat": lat, "lon": lon, "address": address or f"{lat},{lon}"}), 200
 
 
 @app.route("/process_frame", methods=["POST"])
@@ -251,6 +286,9 @@ def debug_route():
         "dest_lat": s.dest_lat,
         "dest_lon": s.dest_lon,
         "map_guidance_active": mg is not None,
+        "route_loading": interpreter.is_route_loading(),
+        "route_fetch_failures": getattr(interpreter, "_route_fetch_failures", 0),
+        "route_permanent_failure": getattr(interpreter, "_route_permanent_failure", False),
         "map_route_attempted": getattr(interpreter, "_map_route_attempted", None),
         "route_waypoints": len(mg.route.waypoints) if mg else 0,
         "route_distance_m": mg.route.distance_m if mg else None,

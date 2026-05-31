@@ -18,6 +18,7 @@ from navigation.maps.router import (
     fetch_route,
     fetch_route_from_json,
     geocode_address,
+    next_waypoint_ahead,
 )
 from navigation.models import NavigationCommand, CareResult, DepthResult, PerceptionBundle, SegmentationResult
 from navigation.reasoning.llm import NavigationInterpreter
@@ -43,6 +44,26 @@ def test_bearing_and_distance(sample_route):
     assert distance_meters(lat, lon, dest_lat, dest_lon) > 100
     b = bearing_to_next_waypoint(lat, lon, sample_route)
     assert 0 <= b < 360
+    _, dist_next, _ = next_waypoint_ahead(lat, lon, sample_route)
+    assert dist_next > 0
+    assert dist_next < distance_meters(lat, lon, dest_lat, dest_lon)
+
+
+def test_next_route_cue_without_compass(sample_route):
+    """Route cues work without heading — progress/turn use GPS-only fallbacks."""
+    from navigation.config import Settings
+    from navigation.maps.guidance import MapGuidance
+    from navigation.reasoning.spatial_reasoner import _next_route_cue
+
+    settings = Settings(route_bearing_align_deg=25, route_at_dest_m=5)
+    guidance = MapGuidance(sample_route, settings)
+    lat, lon = sample_route.waypoints[0]
+    cue = _next_route_cue(
+        guidance, settings, current_lat=lat, current_lon=lon, heading_deg=None
+    )
+    assert cue is not None
+    assert cue.turn in ("left", "right", "forward", "stop")
+    assert cue.meters_to_turn >= 0
 
 
 def test_map_guidance_on_route(sample_route):
@@ -96,6 +117,56 @@ def test_geocode_mocked():
         lat, lon = geocode_address("Times Square", client=client)
     assert lat == pytest.approx(40.7580)
     assert lon == pytest.approx(-73.9855)
+
+
+def test_search_places_mocked():
+    from navigation.maps.router import search_places
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "nominatim.openstreetmap.org" in str(request.url)
+        assert "limit=5" in str(request.url)
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "lat": "40.7580",
+                    "lon": "-73.9855",
+                    "display_name": "Times Square, New York, NY",
+                },
+                {
+                    "lat": "40.7590",
+                    "lon": "-73.9845",
+                    "display_name": "Times Square Station",
+                },
+            ],
+        )
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport, headers={"User-Agent": "test"}) as client:
+        rows = search_places("times square", client=client)
+    assert len(rows) == 2
+    assert rows[0].display_name.startswith("Times Square")
+    assert rows[0].lat == pytest.approx(40.7580)
+
+
+def test_next_route_cue_off_route(sample_route):
+    """Far from polyline → rejoin cue with cross-track distance."""
+    from navigation.reasoning.spatial_reasoner import _next_route_cue
+
+    settings = Settings(route_off_route_m=20)
+    guidance = MapGuidance(sample_route, settings)
+    # Point ~100 m north of the route start (off the polyline).
+    cue = _next_route_cue(
+        guidance,
+        settings,
+        current_lat=40.7494,
+        current_lon=-73.9857,
+        heading_deg=45,
+    )
+    assert cue is not None
+    assert cue.turn in ("left", "right")
+    assert cue.meters_to_turn > settings.route_off_route_m
+    assert "off_route" in cue.rationale
 
 
 def test_obstacle_overrides_map_guidance(sample_route):

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 
 from navigation.config import Settings
 from navigation.models import (
@@ -22,21 +24,51 @@ logger = logging.getLogger(__name__)
 class NavigationInterpreter:
     """Converts structured perception into a NavigationDecision JSON."""
 
+    _MAX_ROUTE_FETCH_ATTEMPTS = 3
+
     def __init__(self, settings: Settings):
         self.settings = settings
         self._chain = None
         self._map_guidance = None
         self._map_route_attempted = False
-        # Static-config map init: only runs if both start AND destination are
-        # in .env. The phone path uses ``ensure_map_guidance`` to lazily
-        # initialize a route the first time live coordinates arrive.
+        self._route_fetch_lock = threading.Lock()
+        self._route_fetch_started = False
+        self._route_generation = 0
+        self._route_fetch_failures = 0
+        self._route_permanent_failure = False
+        self._last_refetch_at = 0.0
         if settings.map_ready:
             self._init_map_guidance(
                 settings.current_lat,  # type: ignore[arg-type]
                 settings.current_lon,  # type: ignore[arg-type]
+                generation=self._route_generation,
             )
 
-    def _init_map_guidance(self, start_lat: float, start_lon: float) -> None:
+    def reset_map_state(self) -> None:
+        """Invalidate route state after a new destination or forced refetch."""
+        with self._route_fetch_lock:
+            self._route_generation += 1
+            self._map_guidance = None
+            self._map_route_attempted = False
+            self._route_fetch_started = False
+            self._route_fetch_failures = 0
+            self._route_permanent_failure = False
+
+    def is_route_loading(self) -> bool:
+        with self._route_fetch_lock:
+            return (
+                self._route_fetch_started
+                and self._map_guidance is None
+                and not self._route_permanent_failure
+            )
+
+    def _init_map_guidance(
+        self,
+        start_lat: float,
+        start_lon: float,
+        *,
+        generation: int,
+    ) -> None:
         from navigation.maps.guidance import MapGuidance
         from navigation.maps.router import fetch_route, save_route_debug
 
@@ -44,48 +76,106 @@ class NavigationInterpreter:
             logger.warning(
                 "Map guidance requested but DEST_LAT/DEST_LON are not set."
             )
-            self._map_route_attempted = True
+            with self._route_fetch_lock:
+                if generation == self._route_generation:
+                    self._map_route_attempted = True
+                    self._route_permanent_failure = True
             return
         try:
+            osrm = getattr(self.settings, "osrm_base_url", "") or None
             route = fetch_route(
                 start_lat,
                 start_lon,
                 self.settings.dest_lat,
                 self.settings.dest_lon,
+                osrm_base=osrm,
             )
-            self._map_guidance = MapGuidance(route, self.settings)
+            with self._route_fetch_lock:
+                if generation != self._route_generation:
+                    logger.info(
+                        "Discarding stale route fetch (gen %d != %d).",
+                        generation,
+                        self._route_generation,
+                    )
+                    return
+                self._map_guidance = MapGuidance(route, self.settings)
+                self._map_route_attempted = True
+                self._route_fetch_failures = 0
+                self._route_permanent_failure = False
             if self.settings.route_debug_path:
                 save_route_debug(self.settings.route_debug_path, route)
-                logger.info(
-                    "Saved route debug to %s", self.settings.route_debug_path
-                )
             logger.info(
                 "Map guidance: %.0f m route, %d waypoints",
                 route.distance_m,
                 len(route.waypoints),
             )
         except Exception as e:
-            logger.warning("Map route unavailable (%s); using vision heuristics.", e)
-        finally:
-            self._map_route_attempted = True
+            with self._route_fetch_lock:
+                if generation != self._route_generation:
+                    return
+                self._route_fetch_failures += 1
+                if self._route_fetch_failures >= self._MAX_ROUTE_FETCH_ATTEMPTS:
+                    self._map_route_attempted = True
+                    self._route_permanent_failure = True
+                    logger.warning(
+                        "Map route unavailable after %d attempts (%s).",
+                        self._route_fetch_failures,
+                        e,
+                    )
+                else:
+                    self._map_route_attempted = False
+                    logger.warning(
+                        "Map route fetch failed (attempt %d/%d): %s",
+                        self._route_fetch_failures,
+                        self._MAX_ROUTE_FETCH_ATTEMPTS,
+                        e,
+                    )
 
     def ensure_map_guidance(self, position: Position) -> None:
-        """Lazily fetch the route once live GPS arrives.
-
-        Called by the phone server on the first request that carries
-        coordinates. After this returns, ``self._map_guidance`` is either
-        set (route fetched) or remains ``None`` (route fetch failed; vision
-        heuristics will continue as fallback).
-        """
-        if (
-            self._map_guidance is not None
-            or self._map_route_attempted
-            or not self.settings.use_map_guidance
-            or not position.has_coords
-        ):
+        """Lazily fetch the route once live GPS arrives (background thread)."""
+        if not self.settings.use_map_guidance or not position.has_coords:
             return
-        assert position.lat is not None and position.lon is not None
-        self._init_map_guidance(position.lat, position.lon)
+        with self._route_fetch_lock:
+            if self._map_guidance is not None:
+                return
+            if self._route_permanent_failure:
+                return
+            if self._route_fetch_started:
+                return
+            if self._map_route_attempted:
+                return
+            self._route_fetch_started = True
+            generation = self._route_generation
+            lat, lon = position.lat, position.lon
+
+        assert lat is not None and lon is not None
+
+        def _fetch() -> None:
+            try:
+                self._init_map_guidance(lat, lon, generation=generation)
+            finally:
+                with self._route_fetch_lock:
+                    self._route_fetch_started = False
+
+        threading.Thread(
+            target=_fetch, daemon=True, name="osrm-route-fetch"
+        ).start()
+
+    def maybe_refetch_route(self, position: Position, cross_track_m: float) -> None:
+        """Re-fetch route from current position when user is far off the polyline."""
+        threshold = float(getattr(self.settings, "route_refetch_off_route_m", 45.0))
+        if cross_track_m < threshold:
+            return
+        now = time.monotonic()
+        if now - self._last_refetch_at < 60.0:
+            return
+        self._last_refetch_at = now
+        logger.info(
+            "Off route by %.0f m — refetching OSRM route from current position.",
+            cross_track_m,
+        )
+        self.reset_map_state()
+        self.ensure_map_guidance(position)
 
     def interpret(
         self,
@@ -98,30 +188,25 @@ class NavigationInterpreter:
         return self._llm(bundle, position=position)
 
     def _obstacle_stop(self, bundle: PerceptionBundle) -> NavigationDecision | None:
-        # Only trust CARE's hazard signal. The depth-based shortcut used to
-        # also force STOP when ``obstacle_depth_m < 0.9``, but depth is still
-        # a mock and that rule produced false STOPs on bright walls. Re-add
-        # the depth check once UniDepthV2 is actually wired.
         if bundle.care.hazard_detected:
             return NavigationDecision(
                 command=NavigationCommand.STOP,
-                confidence=0.65,  # Low confidence = hazard detected, must stop
+                confidence=0.65,
                 rationale="Obstacle or hazard within critical range",
             )
         return None
 
     def _resolve_position(self, position: Position | None) -> Position:
-        """Merge live position with .env fallbacks."""
+        """Merge live position with .env fallbacks (heading stays None if unknown)."""
         if position is None:
             position = Position()
+        heading = position.heading_deg
+        if heading is None:
+            heading = self.settings.current_heading_deg
         return Position(
             lat=position.lat if position.lat is not None else self.settings.current_lat,
             lon=position.lon if position.lon is not None else self.settings.current_lon,
-            heading_deg=(
-                position.heading_deg
-                if position.heading_deg is not None
-                else self.settings.current_heading_deg
-            ),
+            heading_deg=heading,
             accuracy_m=position.accuracy_m,
         )
 
@@ -137,7 +222,6 @@ class NavigationInterpreter:
 
         pos = self._resolve_position(position)
 
-        # Lazy route fetch on first GPS sample (phone-as-camera path).
         if (
             self._map_guidance is None
             and self.settings.use_map_guidance
@@ -147,18 +231,14 @@ class NavigationInterpreter:
 
         if self._map_guidance is not None and pos.has_coords:
             assert pos.lat is not None and pos.lon is not None
-            heading = (
-                pos.heading_deg
-                if pos.heading_deg is not None
-                else self.settings.current_heading_deg
-            )
+            heading = pos.heading_deg if pos.heading_deg is not None else 0.0
             return self._map_guidance.decide(pos.lat, pos.lon, heading)
 
         care = bundle.care
         if care.safety_score < 0.5:
             return NavigationDecision(
                 command=NavigationCommand.SLOW_DOWN,
-                confidence=0.60,  # Low confidence — safety score is low
+                confidence=0.60,
                 rationale="Reduced safety score",
             )
         deg = care.safe_direction_deg or 0.0
@@ -180,8 +260,6 @@ class NavigationInterpreter:
         *,
         position: Position | None = None,
     ) -> NavigationDecision:
-        # Hazard short-circuit: if CARE already flagged a STOP, don't waste
-        # an LLM round-trip on it.
         blocked = self._obstacle_stop(bundle)
         if blocked is not None:
             return blocked

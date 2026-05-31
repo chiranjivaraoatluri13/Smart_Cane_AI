@@ -2,8 +2,20 @@
 
 import numpy as np
 
-from navigation.config import Settings, apply_fast_profile
+from navigation.config import Settings, apply_cloud_profile, apply_fast_profile
 from navigation.utils.image_processing import resize_for_inference, upscale_class_map
+
+
+def test_apply_cloud_profile():
+    s = apply_cloud_profile(Settings(inference_imgsz=0))
+    assert s.inference_imgsz == 192
+    assert s.seg_upscale_class_map is False
+    assert s.onnx_intra_op_threads == 1
+    # Explicit env values are preserved.
+    s2 = apply_cloud_profile(Settings(inference_imgsz=256, onnx_intra_op_threads=2))
+    assert s2.inference_imgsz == 256
+    assert s2.onnx_intra_op_threads == 2
+    assert s2.seg_upscale_class_map is False
 
 
 def test_apply_fast_profile():

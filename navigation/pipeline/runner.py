@@ -31,6 +31,7 @@ from navigation.reasoning.care import CareNavigator
 from navigation.reasoning.composer import PhraseComposer
 from navigation.reasoning.facts import GuidanceFacts, RouteCue
 from navigation.reasoning.llm import NavigationInterpreter
+from navigation.maps.router import cross_track_distance_m
 from navigation.reasoning.spatial_reasoner import SpatialReasoner, _next_route_cue
 from navigation.reasoning.trend import TrendTracker
 
@@ -366,24 +367,37 @@ def _resolve_route_cue(
     # spatial path interpreter.interpret() is never called, so we must
     # trigger the route fetch here — otherwise _map_guidance stays None and
     # the user never gets turn-by-turn directions.
-    if (
-        getattr(interpreter, "_map_guidance", None) is None
-        and settings.use_map_guidance
-        and hasattr(interpreter, "ensure_map_guidance")
-    ):
+    if settings.use_map_guidance and hasattr(interpreter, "ensure_map_guidance"):
         try:
-            interpreter.ensure_map_guidance(pos)
+            if getattr(interpreter, "is_route_loading", lambda: False)():
+                return RouteCue(
+                    turn="loading",
+                    meters_to_turn=0.0,
+                    target_bearing_deg=0.0,
+                    rationale="fetching route",
+                )
+            if getattr(interpreter, "_map_guidance", None) is None:
+                interpreter.ensure_map_guidance(pos)
         except Exception as e:  # pragma: no cover - network failure path
             logger.warning("Route fetch failed (%s); vision-only guidance.", e)
 
     map_guidance = getattr(interpreter, "_map_guidance", None)
     if map_guidance is None:
+        if getattr(interpreter, "is_route_loading", lambda: False)():
+            return RouteCue(
+                turn="loading",
+                meters_to_turn=0.0,
+                target_bearing_deg=0.0,
+                rationale="fetching route",
+            )
         return None
-    heading = (
-        pos.heading_deg
-        if pos.heading_deg is not None
-        else settings.current_heading_deg
-    )
+
+    if hasattr(interpreter, "maybe_refetch_route"):
+        cross = cross_track_distance_m(pos.lat, pos.lon, map_guidance.route)
+        interpreter.maybe_refetch_route(pos, cross)
+
+    # Pass heading only when known — do not substitute 0° (north).
+    heading = pos.heading_deg
     return _next_route_cue(
         map_guidance,
         settings,

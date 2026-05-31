@@ -237,15 +237,24 @@ class AlertTracker:
             cm = cm[0]
         weights = _region_weight_map(cm.shape[:2])
 
+        # One weighted ``bincount`` pass tallies the region-weighted pixel mass
+        # for every class id; only the few ids mapped to an alert category are
+        # then folded in. Avoids a full-frame boolean mask per distinct class.
+        flat = cm.ravel()
+        length = int(flat.max()) + 1
+        pixels_by_id = np.bincount(flat, minlength=length)
+        weighted_by_id = np.bincount(
+            flat, weights=weights.ravel(), minlength=length
+        )
         per_category: dict[str, float] = {}
-        for cls_id in np.unique(cm):
+        for cls_id in np.nonzero(pixels_by_id)[0]:
             name = id_to_name.get(int(cls_id), str(int(cls_id)))
             category = CLASS_TO_CATEGORY.get(name)
             if category is None:
                 continue
-            mask = cm == cls_id
-            weighted = float(weights[mask].sum())
-            per_category[category] = per_category.get(category, 0.0) + weighted
+            per_category[category] = (
+                per_category.get(category, 0.0) + float(weighted_by_id[cls_id])
+            )
         return per_category
 
 

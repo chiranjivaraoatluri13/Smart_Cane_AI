@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 
 from navigation.config import load_settings
-from navigation.maps.router import geocode_address
+from navigation.maps.router import geocode_address, search_places
 from navigation.models import Position
 from navigation.pipeline.runner import (
     _build_pipeline_components,
@@ -80,6 +80,18 @@ def index():
     return _no_cache(send_from_directory('.', 'phone_client.html'))
 
 
+@app.route('/test')
+def test_page():
+    """Serve the camera test page."""
+    return _no_cache(send_from_directory('.', 'test_camera.html'))
+
+
+@app.route('/simple')
+def simple_test():
+    """Serve the simple test page."""
+    return _no_cache(send_from_directory('.', 'simple_test.html'))
+
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint."""
@@ -90,24 +102,75 @@ def health():
     })
 
 
+@app.route('/debug_route', methods=['GET'])
+def debug_route():
+    """Diagnostic — shows destination and route fetch state."""
+    s = interpreter.settings
+    mg = getattr(interpreter, '_map_guidance', None)
+    loading = (
+        interpreter.is_route_loading()
+        if hasattr(interpreter, 'is_route_loading')
+        else False
+    )
+    return jsonify({
+        'use_map_guidance': s.use_map_guidance,
+        'dest_lat': s.dest_lat,
+        'dest_lon': s.dest_lon,
+        'map_guidance_active': mg is not None,
+        'route_loading': loading,
+        'route_fetch_failures': getattr(interpreter, '_route_fetch_failures', 0),
+        'route_permanent_failure': getattr(
+            interpreter, '_route_permanent_failure', False
+        ),
+        'map_route_attempted': getattr(interpreter, '_map_route_attempted', None),
+        'route_waypoints': len(mg.route.waypoints) if mg else 0,
+        'route_distance_m': mg.route.distance_m if mg else None,
+        'frames_processed': frame_id,
+    })
+
+
+@app.route('/search_places', methods=['GET'])
+def search_places_endpoint():
+    """Proxy Nominatim — browsers cannot call it directly (CORS / User-Agent)."""
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 2:
+        return jsonify({'ok': True, 'results': []}), 200
+    try:
+        rows = search_places(q, limit=5)
+        return jsonify({
+            'ok': True,
+            'results': [
+                {'display_name': p.display_name, 'lat': p.lat, 'lon': p.lon}
+                for p in rows
+            ],
+        }), 200
+    except Exception as e:  # pragma: no cover - network failure path
+        return jsonify({
+            'ok': False,
+            'error': 'search_unavailable',
+            'detail': str(e),
+        }), 502
+
+
 @app.route('/set_destination', methods=['POST'])
 def set_destination():
-    """Geocode an address and arm map guidance for the next /process_frame."""
+    """Geocode an address (or accept lat/lon) and arm map guidance."""
     address = (request.form.get('address') or '').strip()
-    if not address:
+    dest_lat = _optional_float(request.form.get('lat'))
+    dest_lon = _optional_float(request.form.get('lon'))
+    if dest_lat is not None and dest_lon is not None:
+        lat, lon = dest_lat, dest_lon
+    elif address:
+        try:
+            lat, lon = geocode_address(address)
+        except ValueError:
+            return jsonify({'ok': False, 'error': 'address_not_found'}), 422
+        except Exception as e:  # pragma: no cover - network failure path
+            return jsonify({'ok': False, 'error': 'geocoder_unavailable', 'detail': str(e)}), 502
+    else:
         return jsonify({'ok': False, 'error': 'missing_address'}), 400
-    try:
-        lat, lon = geocode_address(address)
-    except ValueError:
-        return jsonify({'ok': False, 'error': 'address_not_found'}), 422
-    except Exception as e:  # pragma: no cover - network failure path
-        return jsonify({'ok': False, 'error': 'geocoder_unavailable', 'detail': str(e)}), 502
 
     with _pipeline_lock:
-        # Mutate the running interpreter's destination & invalidate the
-        # current MapGuidance instance so the next frame fetches a fresh
-        # route from live GPS. We do not block the request on the OSRM
-        # call — the next /process_frame with GPS triggers it.
         interpreter.settings = interpreter.settings.model_copy(
             update={
                 'dest_lat': lat,
@@ -115,10 +178,14 @@ def set_destination():
                 'use_map_guidance': True,
             }
         )
-        interpreter._map_guidance = None
-        interpreter._map_route_attempted = False
+        if hasattr(interpreter, 'reset_map_state'):
+            interpreter.reset_map_state()
+        else:
+            interpreter._map_guidance = None
+            interpreter._map_route_attempted = False
 
-    return jsonify({'ok': True, 'lat': lat, 'lon': lon, 'address': address}), 200
+    label = address or f'{lat},{lon}'
+    return jsonify({'ok': True, 'lat': lat, 'lon': lon, 'address': label}), 200
 
 
 @app.route('/process_frame', methods=['POST'])

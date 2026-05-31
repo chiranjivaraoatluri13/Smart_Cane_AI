@@ -225,6 +225,12 @@ def test_interpreter_uses_live_position_for_map_guidance(monkeypatch):
         position=Position(lat=33.4215, lon=-111.9342, heading_deg=270.0),
     )
 
+    import time
+    for _ in range(100):
+        if interp._map_route_attempted:
+            break
+        time.sleep(0.02)
+
     assert interp._map_guidance is not None
     assert decision.command in {
         NavigationCommand.GO_FORWARD,

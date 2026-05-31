@@ -57,10 +57,21 @@ INFERENCE_IMGSZ = 256
 - Minimal accuracy loss for navigation
 
 **Cons:**
-- Requires retraining/exporting ONNX model at 256×256
-- Or use dynamic input size (if ONNX supports it)
+- Slightly coarser segmentation boundaries
 
-**Status:** Already attempted, but ONNX model is fixed at 512×512
+**Status:** ✅ **DONE.** The exported ONNX model has *dynamic* height/width axes
+(`scripts/export_segformer_onnx.py` sets `dynamic_axes` for dims 2 and 3), so it
+runs at any input size with no re-export. Setting `INFERENCE_IMGSZ=256` is honored
+by `SegformerOnnxSegmenter.predict()`. Measured on CPU (478×850 frame):
+
+| INFERENCE_IMGSZ | inference time | FPS |
+|-----------------|---------------|-----|
+| 512 (old default) | ~219 ms | 4.6 |
+| 384 | ~123 ms | 8.1 |
+| 256 (**current prod**, `render.yaml`) | ~94 ms | 10.6 |
+| 192 | ~60 ms | 16.8 |
+
+The earlier "fixed at 512×512" note was incorrect.
 
 ---
 
@@ -109,6 +120,61 @@ USE_DEPTH_ESTIMATION=false  # Use segmentation proxy only
 - Potential accuracy loss
 
 **Recommendation:** ⏳ **DO THIS LATER (if needed)**
+
+---
+
+### ✅ OPTION 5: Analyze at the Model's Native Resolution (DONE)
+**Impact:** Postprocessing 22ms → 6.5ms (~3.4x), no decision change
+
+The segmenter only produces logits at the model stride (e.g. 64×64 for a 256px
+input). The old path *upscaled* that to the full camera frame (478×850 ≈ 406k px)
+and then ran the per-side / obstacle / walkable analysis over all 406k pixels —
+even though every reasoning consumer reads **ratios** (scale-invariant) or weighted
+counts paired with `metadata["shape"]`.
+
+`SegformerOnnxSegmenter.predict()` now runs `_parse_class_map` on the native 64×64
+map and only upscales the dense `class_map` for the consumers that genuinely need
+frame-resolution masks (laptop overlay, depth proxy, proximity alerts). Decisions
+are identical; the O(display_pixels) scans disappear.
+
+Additionally, `_parse_class_map` and the per-side helpers (`navigation/perception/
+spatial.py`) and the alert tally (`navigation/reasoning/alerts.py`) were rewritten
+from per-class boolean-mask loops to single `np.bincount` passes — same outputs,
+one C-level scan instead of one scan per distinct class id. This speeds up the
+laptop (transformers) path too.
+
+---
+
+### ✅ OPTION 6: Fix onnxruntime thread oversubscription (DONE — big cloud win)
+**Impact:** Up to ~5× on a multi-core / mis-sized container; likely the main
+cause of slow Render inference.
+
+The session was created with `intra_op_num_threads = 0` ("use all cores"). In a
+container, ORT reads the **host's** physical core count, not the cgroup CPU
+limit, so on a 1-vCPU box it spawns 8+ threads and thrashes. The INT8 model is
+especially sensitive (dynamic-quant ops scale poorly across threads). Measured
+on an 8-core CPU, 256px input:
+
+| threads | INT8 256 | FP32 256 |
+|---------|----------|----------|
+| 1 | 94 ms | 129 ms |
+| 2 | 63 ms | 78 ms |
+| 4 | 45 ms | 37 ms |
+| all (8) | **220 ms** ⚠️ | 31 ms |
+
+Fix: `onnx_intra_op_threads` setting (`ONNX_INTRA_OP_THREADS` env), defaulting to
+`min(4, cpu_count)` instead of "all", and set to `"1"` in `render.yaml` to match
+the allocated vCPU. **Set the same env on Railway** (`railway.toml` reads env
+from the dashboard). Tuning notes:
+- 1 vCPU plan → `ONNX_INTRA_OP_THREADS=1`
+- 2 vCPU plan → `=2`
+- ≥4 real cores → INT8 plateaus/regresses; the **FP32** model
+  (`SEGFORMER_ONNX_PATH=segformer_b0_ade20k.onnx`) with more threads is fastest
+  (~31 ms at 8 threads). INT8 only wins on 1–2 cores, which is the typical
+  free/standard cloud box — so INT8 stays the cloud default.
+
+Also: preprocessing now resizes *before* the BGR→RGB convert, so the colour swap
+runs on the 256×256 image instead of the full camera frame.
 
 ---
 

@@ -41,6 +41,42 @@ def test_set_destination_geocodes(client):
     assert phone_server.interpreter.settings.use_map_guidance is True
 
 
+def test_set_destination_accepts_lat_lon(client):
+    """Nominatim suggestion path: lat/lon skip geocoder."""
+    with patch.object(phone_server, "geocode_address") as mock_geo:
+        rv = client.post(
+            "/set_destination",
+            data={"lat": "40.7580", "lon": "-73.9855", "address": "Times Square"},
+        )
+    mock_geo.assert_not_called()
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["ok"] is True
+    assert data["lat"] == pytest.approx(40.7580)
+    assert data["lon"] == pytest.approx(-73.9855)
+
+
+def test_search_places_proxies_nominatim(client):
+    from navigation.maps.router import PlaceSuggestion
+
+    fake = [
+        PlaceSuggestion("Empire State Building, NY", 40.7484, -73.9857),
+    ]
+    with patch.object(phone_server, "search_places", return_value=fake):
+        rv = client.get("/search_places?q=empire")
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["ok"] is True
+    assert len(data["results"]) == 1
+    assert "Empire" in data["results"][0]["display_name"]
+
+
+def test_search_places_short_query(client):
+    rv = client.get("/search_places?q=a")
+    assert rv.status_code == 200
+    assert rv.get_json()["results"] == []
+
+
 def test_set_destination_400_on_missing(client):
     rv = client.post("/set_destination", data={})
     assert rv.status_code == 400

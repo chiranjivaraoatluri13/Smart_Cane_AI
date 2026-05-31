@@ -35,6 +35,8 @@ _BUILTIN_FALLBACKS: dict[str, str] = {
     "map_turn_only": "Turn ahead.",
     "map_turn_with_vision_clear": "Turn ahead, path is clear.",
     "map_turn_with_caution": "Turn ahead, slow down.",
+    "map_off_route": "You're off the route. Step to your {turn_direction}.",
+    "map_route_loading": "Loading walking directions…",
     "status_update_clear": "Path is clear ahead.",
     "status_update_progress": "On track.",
     "stairs_warning_low_conf": "Step ahead, slow down.",
@@ -123,17 +125,21 @@ class PhraseComposer:
             )
         if facts.command == NavigationCommand.SLOW_DOWN and self._all_lanes_blocked(facts):
             return "lane_blocked_all_sides"
+        if facts.route_cue is not None and facts.route_cue.turn == "loading":
+            return "map_route_loading"
+        if facts.route_cue is not None and facts.route_cue.rationale.startswith("off_route"):
+            return "map_off_route"
         if facts.route_cue is not None and facts.route_cue.turn in ("left", "right"):
             map_cmd = (
                 NavigationCommand.MOVE_LEFT
                 if facts.route_cue.turn == "left"
                 else NavigationCommand.MOVE_RIGHT
             )
-            return (
-                "map_turn_with_vision_clear"
-                if facts.command == map_cmd
-                else "map_turn_with_caution"
-            )
+            if facts.command == map_cmd:
+                return "map_turn_with_vision_clear"
+            if facts.command in (NavigationCommand.MOVE_LEFT, NavigationCommand.MOVE_RIGHT):
+                return "map_turn_only"
+            return "map_turn_with_caution"
         # Route is active and we're heading the right way — give progress update.
         if facts.route_cue is not None and facts.route_cue.turn == "forward":
             return "status_update_progress"

@@ -19,7 +19,15 @@ services:
       - key: SEGFORMER_ONNX_PATH
         value: segformer_b0_ade20k_int8.onnx
       - key: INFERENCE_IMGSZ
-        value: "256"
+        value: "192"
+      # Match this to the vCPUs your Render plan allocates (Standard = 1).
+      # Leaving ORT on "all cores" oversubscribes the container and makes the
+      # INT8 model several times slower. Raise to 2 if you move to a 2-vCPU plan.
+      - key: ONNX_INTRA_OP_THREADS
+        value: "1"
+      # Cloud reasoning uses native-resolution stats; skip 48×48→frame upscale.
+      - key: SEG_UPSCALE_CLASS_MAP
+        value: "false"
       - key: TTS_ENABLED
         value: "false"
       - key: USE_LLM
@@ -27,11 +35,11 @@ services:
       - key: USE_CARE_HTTP
         value: "false"
       - key: COMMAND_COOLDOWN_SEC
-        value: "8.0"
+        value: "4.0"
       - key: COMMAND_DWELL_FRAMES
-        value: "4"
+        value: "2"
       - key: MIN_SPEECH_GAP_SEC
-        value: "3.0"
+        value: "1.5"
       - key: STOP_HOLD_FRAMES
         value: "8"
       - key: HAZARD_OBSTACLE_RATIO
@@ -44,5 +52,7 @@ services:
         value: "2"
       - key: USE_MAP_GUIDANCE
         value: "true"
+      - key: OSRM_BASE_URL
+        value: "https://router.project-osrm.org/route/v1/foot"
       - key: BUILD_TIMESTAMP
         value: "2026-05-31-rebuild"

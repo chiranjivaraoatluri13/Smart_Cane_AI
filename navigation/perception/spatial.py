@@ -5,8 +5,9 @@ remainder columns from `width % 3` are assigned to the center side so the
 left and right sides have equal width — that's the rule the reasoner
 relies on when comparing walkable ratios.
 
-These helpers run inside the same one-pass `np.unique(class_map)` loop in
-`SegformerSegmenter._parse_class_map`, so no extra full-frame scan is added.
+Each helper makes a single vectorized ``np.bincount`` pass per side (left /
+center / right), so per-class tallies cost one scan of the slice rather than
+one scan per distinct class id.
 """
 
 from __future__ import annotations
@@ -71,10 +72,16 @@ def _per_side_class_pixels(
         wt_side = weight_map[:, sl]
         if cm_side.size == 0:
             continue
-        for cls_id in np.unique(cm_side):
+        # Single C-level pass per side: ``bincount`` tallies the region-weighted
+        # pixel mass for every class id at once, instead of building a boolean
+        # mask and summing per class (which re-scans the slice once per class).
+        flat = cm_side.ravel()
+        length = int(flat.max()) + 1
+        weighted = np.bincount(flat, weights=wt_side.ravel(), minlength=length)
+        counts = np.bincount(flat, minlength=length)
+        for cls_id in np.nonzero(counts)[0]:
             name = id_to_name.get(int(cls_id), str(int(cls_id)))
-            mask = cm_side == cls_id
-            out[side][name] = float(wt_side[mask].sum())
+            out[side][name] = float(weighted[cls_id])
     return out
 
 
@@ -100,11 +107,14 @@ def _per_side_walkable_ratio(
         if cm_side.size == 0:
             out[side] = 0.0
             continue
+        # One ``bincount`` pass yields per-id pixel counts; sum the walkable ids.
+        flat = cm_side.ravel()
+        counts = np.bincount(flat, minlength=int(flat.max()) + 1)
         walkable_pixels = 0
-        for cls_id in np.unique(cm_side):
+        for cls_id in np.nonzero(counts)[0]:
             name = id_to_name.get(int(cls_id), str(int(cls_id)))
             if name in walkable_classes:
-                walkable_pixels += int((cm_side == cls_id).sum())
+                walkable_pixels += int(counts[cls_id])
         out[side] = float(walkable_pixels) / float(cm_side.size)
     return out
 

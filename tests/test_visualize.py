@@ -2,29 +2,37 @@
 
 import numpy as np
 
+from navigation.config import Settings
+from navigation.models import SegmentationResult
+from navigation.perception.segmentation_segformer import SegformerSegmenter
 from navigation.perception.visualize import (
     overlay_from_class_map,
-    overlay_mock,
     render_overlay,
 )
-from navigation.perception.segmentation import YoloSegmenter
-from navigation.config import Settings
 
 
-def test_overlay_mock_shape_and_dtype() -> None:
-    frame = np.full((120, 160, 3), 90, dtype=np.uint8)
-    out = overlay_mock(frame)
-    assert out.shape == frame.shape
-    assert out.dtype == np.uint8
-    assert not np.array_equal(out, frame)
-
-
-def test_render_overlay_dry_run() -> None:
+def test_render_overlay_from_last_segmentation() -> None:
     frame = np.zeros((64, 64, 3), dtype=np.uint8)
-    segmenter = YoloSegmenter(Settings())
-    segmenter.predict(frame, dry_run=True)
-    out = render_overlay(frame, segmenter=segmenter, dry_run=True)
+    segmenter = SegformerSegmenter(Settings())
+    # Seed last_segmentation directly (no model download): a class map the
+    # overlay can tint.
+    class_map = np.zeros((64, 64), dtype=np.int32)
+    class_map[32:, :] = 0
+    class_map[:32, :] = 1
+    segmenter._last_segmentation = SegmentationResult(
+        class_map=class_map,
+        metadata={"id_to_name": {0: "floor", 1: "wall"}},
+    )
+    out = render_overlay(frame, segmenter=segmenter)
     assert out.shape == frame.shape
+
+
+def test_render_overlay_without_segmentation_returns_copy() -> None:
+    frame = np.full((32, 32, 3), 50, dtype=np.uint8)
+    segmenter = SegformerSegmenter(Settings())
+    out = render_overlay(frame, segmenter=segmenter)
+    assert out.shape == frame.shape
+    assert np.array_equal(out, frame)
 
 
 def test_overlay_from_class_map() -> None:

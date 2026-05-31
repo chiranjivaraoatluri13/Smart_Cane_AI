@@ -1,4 +1,10 @@
-"""UniDepthV2 monocular depth adapter."""
+"""Depth estimation adapter.
+
+Produces an approximate obstacle distance from one of two real sources:
+a client-measured value (on-device Depth Anything V2, posted as ``depth_m``)
+or a geometric proxy derived from the segmentation class map. No synthetic
+brightness fallback — if neither source is available, depth is undefined.
+"""
 
 from __future__ import annotations
 
@@ -13,69 +19,59 @@ from navigation.models import DepthResult, SegmentationResult
 logger = logging.getLogger(__name__)
 
 
-class UniDepthEstimator:
-    """UniDepthV2 integration point; mock depth until weights are wired."""
+class DepthEstimator:
+    """Derives obstacle depth from client depth or the segmentation proxy."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self._model: Any = None
-        self._live_warned = False
 
     def predict(
         self,
         frame: np.ndarray,
         *,
-        dry_run: bool = False,
         segmentation: SegmentationResult | None = None,
+        external_depth_m: float | None = None,
     ) -> DepthResult:
-        if dry_run or not self.settings.unidepth_model_path:
-            return self._mock(frame, segmentation=segmentation)
-        return self._predict_live(frame, segmentation=segmentation)
-
-    def _predict_live(
-        self,
-        frame: np.ndarray,
-        *,
-        segmentation: SegmentationResult | None = None,
-    ) -> DepthResult:
-        # UniDepthV2 isn't wired yet. Instead of crashing the pipeline when
-        # UNIDEPTH_MODEL_PATH is set, warn once and fall back to the mock so
-        # the rest of the system keeps running.
-        if not self._live_warned:
-            logger.warning(
-                "UNIDEPTH_MODEL_PATH=%r is set but live UniDepthV2 inference is "
-                "not wired in navigation/perception/depth.py. Falling back to "
-                "synthetic depth (mock).",
-                self.settings.unidepth_model_path,
-            )
-            self._live_warned = True
-        return self._mock(frame, segmentation=segmentation)
-
-    def _mock(
-        self,
-        frame: np.ndarray,
-        *,
-        segmentation: SegmentationResult | None = None,
-    ) -> DepthResult:
-        # Prefer a segmentation-derived proxy when available. This is a far
-        # better signal than image brightness because it correlates with the
-        # actual safety question: "is the path ahead walkable or blocked?"
+        # Depth sources, in priority order:
+        # 1. Real depth measured on the client (Depth Anything V2 on the phone),
+        #    posted as ``depth_m`` — wins when present.
+        # 2. Geometric proxy derived from the segmentation class map (real
+        #    computation from the live segmenter, not fabricated).
+        if external_depth_m is not None:
+            return self._from_external(external_depth_m)
         proxy = self._proxy_from_segmentation(frame, segmentation)
         if proxy is not None:
             return proxy
+        # No segmentation class map available — depth cannot be derived.
+        raise ValueError(
+            "Depth requires a segmentation class map or a client external_depth_m; "
+            "neither was provided."
+        )
 
-        # Fallback: synthetic depth from the brightness of the central patch.
-        # Used only when no segmentation result is provided (e.g. unit tests).
-        h, w = frame.shape[:2]
-        gray = np.mean(frame, axis=2) if frame.ndim == 3 else frame
-        center = gray[h // 3 : 2 * h // 3, w // 3 : 2 * w // 3]
-        center_depth = float(3.0 - (center.mean() / 255.0) * 2.0)
+    @staticmethod
+    def _from_external(depth_m: float) -> DepthResult:
+        """Build a DepthResult from a client-measured obstacle distance.
+
+        The phone computes an approximate nearest-obstacle distance from an
+        on-device depth network and posts it as ``depth_m``. We clamp it to a
+        sane walking range and treat it as both the center and obstacle depth.
+        """
+        try:
+            d = float(depth_m)
+        except (TypeError, ValueError):
+            d = 0.0
+        # NaN is unknown -> treat as "close" (safest for a walking aid).
+        # Infinities clamp naturally below (+inf -> far, -inf -> close).
+        if np.isnan(d):
+            d = 0.0
+        d = max(0.3, min(15.0, d))
         return DepthResult(
             depth_map=None,
-            min_depth_m=max(0.5, center_depth - 0.5),
-            center_depth_m=center_depth,
-            obstacle_depth_m=center_depth,
-            metadata={"mock": True, "source": "brightness"},
+            min_depth_m=max(0.3, d - 0.5),
+            center_depth_m=d,
+            obstacle_depth_m=d,
+            metadata={"mock": False, "source": "client_depth_anything"},
         )
 
     def _proxy_from_segmentation(
@@ -124,12 +120,10 @@ class UniDepthEstimator:
         id_to_name = {int(k): str(v) for k, v in id_to_name.items()}
 
         try:
-            from navigation.config import load_yaml_config
-
-            cfg = load_yaml_config(self.settings.config_path)
+            seg_cfg = self.settings.seg_class_config()
         except Exception:
-            cfg = {}
-        seg_cfg = cfg.get("segmentation", {}) if isinstance(cfg, dict) else {}
+            seg_cfg = {}
+        seg_cfg = seg_cfg if isinstance(seg_cfg, dict) else {}
         walkable_set = set(seg_cfg.get("walkable_classes", []))
         obstacle_set = set(seg_cfg.get("obstacle_classes", []))
 
@@ -224,3 +218,12 @@ def _row_to_depth_m(y_frac: float) -> float:
         return 5.0
     below = y_frac - horizon  # 0 (at horizon) → 0.5 (at frame bottom)
     return max(0.5, min(10.0, 0.4 / max(below, 0.04)))
+
+
+# Backwards-compatible alias: the class was historically named
+# ``UniDepthEstimator``. Depth no longer depends on UniDepth, but the alias
+# keeps existing imports working.
+UniDepthEstimator = DepthEstimator
+
+
+__all__ = ["DepthEstimator", "UniDepthEstimator"]

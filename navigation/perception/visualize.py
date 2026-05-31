@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 if TYPE_CHECKING:
-    from navigation.perception.segmentation import YoloSegmenter
+    from navigation.perception.segmentation_segformer import SegformerSegmenter
 
 # Cityscapes-style BGR tints (reference panoptic look)
 CITYSCAPES_COLORS_BGR: dict[str, tuple[int, int, int]] = {
@@ -54,54 +54,6 @@ def _blend_region(
     base[mask] = base[mask] * (1.0 - alpha) + tint * alpha
 
 
-def overlay_mock(frame: np.ndarray) -> np.ndarray:
-    """Cityscapes-style demo colors without GPU (for --dry-run)."""
-    h, w = frame.shape[:2]
-    out = frame.astype(np.float32)
-    yy, xx = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
-    _blend_region(
-        out,
-        CITYSCAPES_COLORS_BGR["sky"],
-        yy < h // 3,
-        _OVERLAY_ALPHA,
-    )
-    _blend_region(
-        out,
-        CITYSCAPES_COLORS_BGR["building"],
-        (yy >= h // 3)
-        & (yy < h * 2 // 3)
-        & (xx > w // 4)
-        & (xx < 3 * w // 4),
-        _OVERLAY_ALPHA * 0.75,
-    )
-    _blend_region(
-        out,
-        CITYSCAPES_COLORS_BGR["road"],
-        yy >= h * 2 // 3,
-        _OVERLAY_ALPHA,
-    )
-    _blend_region(
-        out,
-        CITYSCAPES_COLORS_BGR["sidewalk"],
-        (yy >= h * 2 // 3) & (xx <= w // 5),
-        _OVERLAY_ALPHA * 0.85,
-    )
-    _blend_region(
-        out,
-        CITYSCAPES_COLORS_BGR["vegetation"],
-        (yy >= h // 3)
-        & (yy < h * 2 // 3)
-        & ((xx <= w // 4) | (xx >= 3 * w // 4)),
-        _OVERLAY_ALPHA * 0.85,
-    )
-    cx, cy = w // 2, h // 2
-    person_mask = ((xx - cx) ** 2 + (yy - cy) ** 2) < (min(h, w) * 0.12) ** 2
-    _blend_region(out, CITYSCAPES_COLORS_BGR["person"], person_mask, _OVERLAY_ALPHA)
-    car_mask = (yy >= h * 2 // 3) & (xx > w // 3) & (xx < 2 * w // 3)
-    _blend_region(out, CITYSCAPES_COLORS_BGR["car"], car_mask, _OVERLAY_ALPHA * 0.9)
-    return out.astype(np.uint8)
-
-
 def overlay_from_class_map(
     frame: np.ndarray,
     class_map: np.ndarray,
@@ -130,17 +82,6 @@ def overlay_from_class_map(
     return out.astype(np.uint8)
 
 
-def overlay_from_ultralytics(results: Any, frame: np.ndarray) -> np.ndarray:
-    """Prefer dense semantic tint; fall back to Ultralytics plot() for instance seg."""
-    r0 = results[0]
-    sem = getattr(r0, "semantic_mask", None)
-    if sem is not None and sem.data is not None:
-        id_to_name = {int(k): str(v) for k, v in (r0.names or {}).items()}
-        class_map = sem.data.cpu().numpy()
-        return overlay_from_class_map(frame, class_map, id_to_name)
-    return np.asarray(r0.plot())
-
-
 def overlay_from_masks(
     frame: np.ndarray,
     class_names: list[str],
@@ -166,35 +107,16 @@ def overlay_from_masks(
 def render_overlay(
     frame: np.ndarray,
     *,
-    segmenter: YoloSegmenter,
-    dry_run: bool,
+    segmenter: "SegformerSegmenter",
 ) -> np.ndarray:
-    if dry_run:
-        return overlay_mock(frame)
-
     seg = segmenter.last_segmentation
     if seg is not None and seg.class_map is not None:
         id_to_name = {}
         meta = seg.metadata.get("id_to_name")
         if isinstance(meta, dict):
             id_to_name = {int(k): str(v) for k, v in meta.items()}
-        if not id_to_name:
-            results = segmenter.last_results
-            if results:
-                id_to_name = {
-                    int(k): str(v) for k, v in (results[0].names or {}).items()
-                }
         return overlay_from_class_map(frame, seg.class_map, id_to_name)
 
-    results = segmenter.last_results
-    if results is not None:
-        try:
-            return overlay_from_ultralytics(results, frame)
-        except Exception:
-            pass
-
-    if seg is not None and seg.masks:
-        return overlay_from_masks(frame, seg.class_names, seg.masks)
     return frame.copy()
 
 

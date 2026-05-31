@@ -10,7 +10,7 @@ def test_apply_fast_profile():
     s = apply_fast_profile(Settings())
     assert s.frame_width == 320
     assert s.process_every_n_frames == 3
-    assert s.yolo_imgsz == 256
+    assert s.inference_imgsz == 256
 
 
 def test_upscale_class_map():

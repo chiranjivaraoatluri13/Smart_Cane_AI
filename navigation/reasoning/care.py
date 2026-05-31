@@ -23,10 +23,8 @@ class CareNavigator:
         frame: np.ndarray,
         segmentation: SegmentationResult,
         depth: DepthResult,
-        *,
-        dry_run: bool = False,
     ) -> CareResult:
-        if dry_run or not self.settings.use_care_http:
+        if not self.settings.use_care_http:
             return self._heuristic(segmentation, depth)
         return self._call_remote(frame, segmentation, depth)
 

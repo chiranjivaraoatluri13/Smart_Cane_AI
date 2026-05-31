@@ -6,7 +6,7 @@ left and right sides have equal width — that's the rule the reasoner
 relies on when comparing walkable ratios.
 
 These helpers run inside the same one-pass `np.unique(class_map)` loop in
-`YoloSegmenter._parse_semantic`, so no extra full-frame scan is added.
+`SegformerSegmenter._parse_class_map`, so no extra full-frame scan is added.
 """
 
 from __future__ import annotations

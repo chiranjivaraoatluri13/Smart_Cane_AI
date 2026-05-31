@@ -8,8 +8,10 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      - key: YOLO_MODEL_PATH
-        value: yolo26n-sem.onnx
+      - key: SEGMENTER_BACKEND
+        value: segformer
+      - key: SEGFORMER_MODEL_ID
+        value: nvidia/segformer-b0-finetuned-ade-512-512
       - key: TTS_ENABLED
         value: "false"
       - key: USE_LLM

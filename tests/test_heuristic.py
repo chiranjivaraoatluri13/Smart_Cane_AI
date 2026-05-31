@@ -1,4 +1,4 @@
-"""Tests for dry-run heuristic path."""
+"""Tests for the heuristic interpreter path."""
 
 import numpy as np
 
@@ -16,7 +16,7 @@ def test_heuristic_stop_on_hazard():
         depth=DepthResult(obstacle_depth_m=0.5),
         care=CareResult(hazard_detected=True, safety_score=0.2),
     )
-    decision = interp.interpret(bundle, dry_run=True)
+    decision = interp.interpret(bundle)
     assert decision.command.value == "stop"
 
 
@@ -29,5 +29,5 @@ def test_use_llm_false_skips_api():
         depth=DepthResult(),
         care=CareResult(safety_score=0.9),
     )
-    decision = interp.interpret(bundle, dry_run=False)
+    decision = interp.interpret(bundle)
     assert decision.command.value == "go_forward"

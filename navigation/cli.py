@@ -95,11 +95,6 @@ def main() -> None:
 
     run_parser = sub.add_parser("run", help="Run camera or single-image pipeline")
     run_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Mock perception + heuristic LLM (no weights, no TTS required)",
-    )
-    run_parser.add_argument(
         "--no-llm",
         action="store_true",
         help="Use rule-based commands (no Ollama/API); good for demos",
@@ -107,7 +102,7 @@ def main() -> None:
     run_parser.add_argument(
         "--fast",
         action="store_true",
-        help="256p YOLO, infer every 3rd frame, no CARE HTTP (smoother CPU)",
+        help="256p inference, every 3rd frame, no CARE HTTP (smoother CPU)",
     )
     run_parser.add_argument(
         "--demo",
@@ -177,11 +172,6 @@ def main() -> None:
         help="Show segmentation overlay only (no depth/LLM/TTS)",
     )
     preview_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Colored mock overlay (no YOLO weights)",
-    )
-    preview_parser.add_argument(
         "--fast",
         action="store_true",
         help="320p, infer every 2nd frame (smoother CPU)",
@@ -222,7 +212,6 @@ def main() -> None:
             )
         raise SystemExit(
             run_pipeline(
-                dry_run=args.dry_run,
                 camera_index=args.camera,
                 image_path=args.image,
                 max_frames=args.max_frames,
@@ -236,7 +225,6 @@ def main() -> None:
         settings = _resolve_settings(args)
         raise SystemExit(
             run_preview(
-                dry_run=args.dry_run,
                 camera_index=args.camera,
                 image_path=args.image,
                 max_frames=args.max_frames,

@@ -154,12 +154,15 @@ def process_frame_endpoint():
             accuracy_m=_optional_float(request.form.get('accuracy')),
         )
 
+        # Real depth measured on-device by the phone (Depth Anything V2).
+        # Absent => the pipeline falls back to its geometric proxy.
+        client_depth_m = _optional_float(request.form.get('depth_m'))
+
         with _pipeline_lock:
             record = run_process_frame(
                 frame,
                 frame_id=frame_id,
                 settings=settings,
-                dry_run=False,
                 segmenter=segmenter,
                 depth_est=depth_est,
                 care=care,
@@ -173,6 +176,7 @@ def process_frame_endpoint():
                 trend_tracker=trend_tracker,
                 stairs_detector=stairs_detector,
                 position=position,
+                client_depth_m=client_depth_m,
             )
             process_time = time.time() - start_time
             fps = 1.0 / process_time if process_time > 0 else 0
@@ -194,11 +198,13 @@ def process_frame_endpoint():
             response['facts'] = record['facts']
         if 'timings_ms' in record:
             response['timings_ms'] = record['timings_ms']
+        response['depth_source'] = 'client' if client_depth_m is not None else 'proxy'
 
         print(
             f"Frame {frame_id}: {record['command'].upper()} "
             f"({'VOICE' if record.get('speak') else 'silent'}, "
-            f"conf={record['confidence']:.2f}, {int(process_time*1000)}ms, {fps:.1f} FPS)"
+            f"conf={record['confidence']:.2f}, {int(process_time*1000)}ms, {fps:.1f} FPS, "
+            f"depth={response['depth_source']})"
         )
         return jsonify(response)
 

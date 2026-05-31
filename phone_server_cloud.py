@@ -1,18 +1,19 @@
 """
-Cloud-deployable phone server — uses ONNX runtime instead of PyTorch.
+Cloud-deployable phone server.
 
-No torch, no ultralytics. Only onnxruntime (~50MB) for inference.
-Designed for Render / Railway free tier.
+Runs the full navigation pipeline with the ADE20K SegFormer segmenter.
+Designed for Render / Railway. Prefer the lightweight SegFormer-B0 checkpoint
+on constrained free-tier hosts (set SEGFORMER_MODEL_ID).
 
 Required files in repo:
-  yolo26n-sem.onnx   (export with: python scripts/export_onnx.py)
   config/default.yaml
   config/phrases.yaml
   navigation/  (full package)
   phone_client.html
 
 Environment variables to set in Render dashboard:
-  YOLO_MODEL_PATH=yolo26n-sem.onnx
+  SEGMENTER_BACKEND=segformer
+  SEGFORMER_MODEL_ID=nvidia/segformer-b0-finetuned-ade-512-512
   TTS_ENABLED=false
   USE_LLM=false
   USE_CARE_HTTP=false
@@ -47,10 +48,10 @@ from flask import Flask, jsonify, request, send_from_directory
 
 # Startup diagnostic — printed before any imports so Render logs show it.
 print(f"Python {sys.version}", flush=True)
-print(f"YOLO_MODEL_PATH={os.environ.get('YOLO_MODEL_PATH', 'NOT SET')}", flush=True)
+print(f"SEGMENTER_BACKEND={os.environ.get('SEGMENTER_BACKEND', 'segformer')}", flush=True)
+print(f"SEGFORMER_MODEL_ID={os.environ.get('SEGFORMER_MODEL_ID', 'default')}", flush=True)
 print(f"Working dir: {os.getcwd()}", flush=True)
 print(f"sys.path[0]: {sys.path[0]}", flush=True)
-print(f"ONNX file exists: {pathlib.Path(os.environ.get('YOLO_MODEL_PATH', 'yolo26n-sem.onnx')).is_file()}", flush=True)
 print(f"navigation package: {(_project_root / 'navigation' / '__init__.py').is_file()}", flush=True)
 
 from navigation.config import load_settings
@@ -59,7 +60,7 @@ from navigation.models import Position
 from navigation.output.validator import CommandValidator
 from navigation.output.voice_queue import VoiceQueue
 from navigation.perception.depth import UniDepthEstimator
-from navigation.perception.segmentation_onnx import OnnxSegmenter
+from navigation.perception.segmentation_base import build_segmenter
 from navigation.perception.stairs import StairsDetector
 from navigation.output.tts import SpeechEngine
 from navigation.reasoning.alerts import AlertTracker
@@ -75,8 +76,8 @@ app = Flask(__name__)
 print("Loading navigation models (cloud/ONNX mode)...")
 settings = load_settings()
 
-# Use the ONNX segmenter — no torch required.
-segmenter = OnnxSegmenter(settings)
+# ADE20K SegFormer segmenter (indoor + outdoor, no closed-set hallucination).
+segmenter = build_segmenter(settings)
 depth_est = UniDepthEstimator(settings)
 care = CareNavigator(settings)
 interpreter = NavigationInterpreter(settings)
@@ -166,12 +167,15 @@ def process_frame_endpoint():
             accuracy_m=_optional_float(request.form.get("accuracy")),
         )
 
+        # Real depth measured on-device by the phone (Depth Anything V2).
+        # Absent => the pipeline falls back to its geometric proxy.
+        client_depth_m = _optional_float(request.form.get("depth_m"))
+
         with _pipeline_lock:
             record = process_frame(
                 frame,
                 frame_id=frame_id,
                 settings=settings,
-                dry_run=False,
                 segmenter=segmenter,
                 depth_est=depth_est,
                 care=care,
@@ -185,6 +189,7 @@ def process_frame_endpoint():
                 trend_tracker=trend_tracker,
                 stairs_detector=stairs_detector,
                 position=position,
+                client_depth_m=client_depth_m,
             )
             process_time = time.time() - start_time
             fps = 1.0 / process_time if process_time > 0 else 0
@@ -204,11 +209,15 @@ def process_frame_endpoint():
         }
         if "facts" in record:
             response["facts"] = record["facts"]
+        response["depth_source"] = (
+            "client" if client_depth_m is not None else "proxy"
+        )
 
         print(
             f"Frame {frame_id}: {record['command'].upper()} "
             f"({'VOICE' if record.get('speak') else 'silent'}, "
-            f"{int(process_time * 1000)}ms)"
+            f"{int(process_time * 1000)}ms, "
+            f"depth={response['depth_source']})"
         )
         return jsonify(response)
 

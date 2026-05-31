@@ -8,7 +8,8 @@ from hypothesis import given, settings, strategies as st
 
 from navigation.config import Settings
 from navigation.models import SIDES
-from navigation.perception.segmentation import YoloSegmenter, _region_weight_map
+from navigation.perception.segmentation_base import _region_weight_map
+from navigation.perception.segmentation_segformer import SegformerSegmenter
 from navigation.perception.spatial import (
     _per_side_class_pixels,
     _per_side_walkable_ratio,
@@ -127,12 +128,14 @@ def test_empty_helpers_return_correct_shapes():
         assert walk[s] == 0.0
 
 
-def test_mock_returns_zeroed_per_side_dicts():
-    """Requirement 1.6 — mock segmenter populates per-side fields."""
-    settings = Settings(yolo_model_path="yolo26n-sem.pt")
-    segmenter = YoloSegmenter(settings)
-    frame = np.zeros((40, 60, 3), dtype=np.uint8)
-    seg = segmenter.predict(frame, dry_run=True)
+def test_parser_populates_per_side_dicts():
+    """Requirement 1.6 — the segmenter parser populates per-side fields."""
+    segmenter = SegformerSegmenter(Settings())
+    segmenter._id_to_name = {0: "floor", 1: "person"}
+    class_map = np.zeros((40, 60), dtype=np.int32)
+    class_map[20:, :] = 0
+    class_map[:20, 20:40] = 1
+    seg = segmenter._parse_class_map(class_map, 40, 60)
     assert seg.per_side_class_pixels is not None
     assert seg.per_side_walkable_ratio is not None
     assert set(seg.per_side_class_pixels.keys()) == set(SIDES)

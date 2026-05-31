@@ -116,3 +116,31 @@ def test_process_frame_returns_json_with_command(client):
 def test_process_frame_400_when_missing_frame(client):
     rv = client.post("/process_frame", data={}, content_type="multipart/form-data")
     assert rv.status_code == 400
+
+
+def test_process_frame_without_depth_uses_proxy(client):
+    data = {"frame": (io.BytesIO(_jpeg_bytes()), "frame.jpg")}
+    rv = client.post("/process_frame", data=data, content_type="multipart/form-data")
+    assert rv.status_code == 200
+    assert rv.get_json()["depth_source"] == "proxy"
+
+
+def test_process_frame_with_depth_m_uses_client(client):
+    """A posted depth_m value flips the depth source to the on-device path."""
+    data = {
+        "frame": (io.BytesIO(_jpeg_bytes()), "frame.jpg"),
+        "depth_m": "1.8",
+    }
+    rv = client.post("/process_frame", data=data, content_type="multipart/form-data")
+    assert rv.status_code == 200
+    assert rv.get_json()["depth_source"] == "client"
+
+
+def test_process_frame_ignores_blank_depth_m(client):
+    data = {
+        "frame": (io.BytesIO(_jpeg_bytes()), "frame.jpg"),
+        "depth_m": "",
+    }
+    rv = client.post("/process_frame", data=data, content_type="multipart/form-data")
+    assert rv.status_code == 200
+    assert rv.get_json()["depth_source"] == "proxy"

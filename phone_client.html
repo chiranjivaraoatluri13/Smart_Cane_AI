@@ -373,6 +373,16 @@
         let lastPosition = { lat: null, lon: null, accuracy: null };
         let lastHeading  = null;
 
+        // ── On-device depth (Depth Anything V2 via transformers.js) ──
+        // Depth runs on the phone GPU/NPU in the browser. We compute it on
+        // every Nth processed frame and reuse the last value in between so a
+        // ~300-700ms inference never blocks the per-frame upload loop. The
+        // server falls back to its geometric proxy whenever depth_m is absent.
+        const DEPTH_EVERY_N = 3;          // run depth on 1 of every N frames
+        let lastDepthM      = null;       // most recent approx obstacle depth (m)
+        let depthBusy       = false;      // guard: one inference at a time
+        let _lastDepthLogAt = 0;
+
         // ============================================================
         // Navigation toggle (tap status area or button)
         // ============================================================
@@ -601,6 +611,31 @@
         }
 
         // ============================================================
+        // On-device depth update (non-blocking)
+        // ============================================================
+        async function maybeUpdateDepth(canvas) {
+            if (depthBusy) return;
+            if (frameCount % DEPTH_EVERY_N !== 0) return;
+            if (typeof window.computeDepthMeters !== 'function') return;
+            depthBusy = true;
+            try {
+                const m = await window.computeDepthMeters(canvas);
+                if (m != null && !Number.isNaN(m)) {
+                    lastDepthM = m;
+                    const now = Date.now();
+                    if (now - _lastDepthLogAt > 2000) {
+                        _lastDepthLogAt = now;
+                        dbg('depth', m.toFixed(2) + 'm', window.__depthStatus || '');
+                    }
+                }
+            } catch (e) {
+                dbg('depth error:', e.message);
+            } finally {
+                depthBusy = false;
+            }
+        }
+
+        // ============================================================
         // Process frame
         // ============================================================
         async function processFrame() {
@@ -614,6 +649,10 @@
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, 640, 480);
 
+            // Fire-and-forget on-device depth on every Nth frame. It updates
+            // `lastDepthM` for subsequent frames rather than blocking this one.
+            maybeUpdateDepth(canvas);
+
             canvas.toBlob(async (blob) => {
                 const formData = new FormData();
                 formData.append('frame', blob, 'frame.jpg');
@@ -621,6 +660,7 @@
                 if (lastPosition.lon      != null) formData.append('lon',      String(lastPosition.lon));
                 if (lastPosition.accuracy != null) formData.append('accuracy', String(lastPosition.accuracy));
                 if (lastHeading           != null) formData.append('heading',  String(lastHeading));
+                if (lastDepthM            != null) formData.append('depth_m',  String(lastDepthM));
 
                 try {
                     const response = await fetch(SERVER_URL + '/process_frame', {
@@ -739,6 +779,125 @@
                 console.log('Wake lock error:', err);
             });
         }
+    </script>
+
+    <!-- ============================================================
+         On-device monocular depth (Depth Anything V2 via transformers.js).
+         Runs in the phone browser on WebGPU (falls back to WASM). Exposes
+         window.computeDepthMeters(canvas) -> Promise<number|null>. The phone
+         turns the model's per-frame relative depth into an approximate
+         obstacle distance in meters; the server's bucketize() consumes it
+         unchanged. No hosted GPU required.
+    ============================================================ -->
+    <script type="module">
+        import {
+            pipeline,
+            env,
+        } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1';
+
+        // Allow remote model download from the HuggingFace hub; disable the
+        // local-model lookup (we have no bundled weights).
+        env.allowLocalModels = false;
+
+        const MODEL_ID = 'onnx-community/depth-anything-v2-small';
+
+        // Calibration. Depth Anything outputs *relative inverse depth*
+        // (larger = closer), normalized per frame. We take a high percentile
+        // of the predicted depth in the center-bottom walking band as the
+        // "nearest object" reading, normalize it against the frame's own
+        // min/max to a [0,1] closeness, then map closeness -> meters. The
+        // bounds below define the spoken-distance range; tune DEPTH_CALIBRATION
+        // on your phone (stand a known distance from a wall and read the log).
+        const DEPTH_MIN_M       = 0.5;   // clamp floor (very close)
+        const DEPTH_MAX_M       = 8.0;   // clamp ceiling ("far")
+        const DEPTH_CALIBRATION = 1.0;   // multiplicative scale, tune on device
+        const NEAR_PERCENTILE   = 0.90;  // 0.90 = treat closest 10% as "object"
+
+        let depthPipe    = null;
+        let depthLoading = false;
+        window.__depthStatus = 'idle';
+
+        async function initDepth() {
+            if (depthPipe || depthLoading) return;
+            depthLoading = true;
+            const device = ('gpu' in navigator) ? 'webgpu' : 'wasm';
+            window.__depthStatus = 'loading (' + device + ')';
+            console.log('[depth] loading', MODEL_ID, 'on', device);
+            try {
+                depthPipe = await pipeline('depth-estimation', MODEL_ID, {
+                    device,
+                    dtype: device === 'webgpu' ? 'fp16' : 'q8',
+                });
+                window.__depthStatus = 'ready (' + device + ')';
+                console.log('[depth] ready on', device);
+            } catch (e) {
+                window.__depthStatus = 'failed: ' + (e && e.message);
+                console.error('[depth] load failed', e);
+                depthPipe = null;
+            } finally {
+                depthLoading = false;
+            }
+        }
+
+        window.computeDepthMeters = async function (canvas) {
+            if (!depthPipe) { initDepth(); return null; }
+            try {
+                const out = await depthPipe(canvas);
+                const t = out && out.predicted_depth;
+                if (!t || !t.data || !t.dims) return null;
+
+                const data = t.data; // Float32Array, larger = closer
+                let h, w;
+                if (t.dims.length === 3) { h = t.dims[1]; w = t.dims[2]; }
+                else if (t.dims.length === 2) { h = t.dims[0]; w = t.dims[1]; }
+                else { return null; }
+
+                // Global min/max for per-frame normalization.
+                let gmin = Infinity, gmax = -Infinity;
+                for (let i = 0; i < data.length; i++) {
+                    const v = data[i];
+                    if (v < gmin) gmin = v;
+                    if (v > gmax) gmax = v;
+                }
+                if (!(gmax > gmin)) return null;
+
+                // Center-bottom walking band: bottom 40% rows, center 50% cols.
+                const y0 = Math.floor(h * 0.60);
+                const x0 = Math.floor(w * 0.25);
+                const x1 = Math.floor(w * 0.75);
+                const band = [];
+                for (let y = y0; y < h; y++) {
+                    const row = y * w;
+                    for (let x = x0; x < x1; x++) band.push(data[row + x]);
+                }
+                if (band.length === 0) return null;
+
+                // Nearest object = high inverse-depth percentile in the band.
+                band.sort((a, b) => a - b);
+                const idx = Math.min(
+                    band.length - 1,
+                    Math.floor(band.length * NEAR_PERCENTILE)
+                );
+                const near = band[idx];
+
+                // closeness in [0,1] (1 = closest pixel in the frame).
+                const closeness = (near - gmin) / (gmax - gmin);
+                // Closer -> fewer meters (inverse mapping).
+                let meters = DEPTH_MAX_M - closeness * (DEPTH_MAX_M - DEPTH_MIN_M);
+                meters *= DEPTH_CALIBRATION;
+                meters = Math.max(DEPTH_MIN_M, Math.min(DEPTH_MAX_M, meters));
+                return meters;
+            } catch (e) {
+                window.__depthStatus = 'infer error: ' + (e && e.message);
+                console.error('[depth] inference error', e);
+                return null;
+            }
+        };
+
+        window.initDepth = initDepth;
+        // Kick off the (cached) model download immediately so it's ready by
+        // the time the user taps Start.
+        initDepth();
     </script>
 </body>
 </html>

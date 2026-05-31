@@ -154,11 +154,10 @@ class StairsDetector:
 
     def _walkable_class_set(self) -> set[str]:
         try:
-            yaml_cfg = self.settings.yaml_config()
+            seg_cfg = self.settings.seg_class_config()
         except Exception:
-            yaml_cfg = {}
-        seg_cfg = (yaml_cfg or {}).get("segmentation", {})
-        return set(seg_cfg.get("walkable_classes", []))
+            seg_cfg = {}
+        return set((seg_cfg or {}).get("walkable_classes", []))
 
 
 __all__ = ["StairsDetector"]

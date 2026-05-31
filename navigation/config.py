@@ -33,9 +33,19 @@ class Settings(BaseSettings):
     inference_height: int = 0
     process_every_n_frames: int = 1
 
-    yolo_model_path: str = "yolo26n-sem.pt"
-    yolo_confidence: float = 0.35
-    yolo_imgsz: int = 0
+    # Inference image size for the segmenter (0 = use the processor/model
+    # default). Kept as a generic knob; the fast profile lowers it for CPU.
+    inference_imgsz: int = 0
+
+    # Segmentation backend. Options:
+    #   "segformer"      — ADE20K SegFormer via transformers (accurate, slower on CPU)
+    #   "segformer_onnx" — ADE20K SegFormer via onnxruntime INT8 (fast, recommended)
+    segmenter_backend: str = "segformer_onnx"
+    segformer_model_id: str = "nvidia/segformer-b2-finetuned-ade-512-512"
+    segformer_device: str = "auto"
+    # Path to the exported ONNX model (used when segmenter_backend=segformer_onnx).
+    # Export with: python scripts/export_segformer_onnx.py
+    segformer_onnx_path: str = "segformer_b0_ade20k_int8.onnx"
 
     unidepth_model_path: str = ""
     unidepth_device: str = "auto"
@@ -119,6 +129,20 @@ class Settings(BaseSettings):
     def yaml_config(self) -> dict[str, Any]:
         return load_yaml_config(self.config_path)
 
+    def seg_class_config(self) -> dict[str, Any]:
+        """Return the walkable/obstacle/hazard class lists for the segmenter.
+
+        The active backend is the ADE20K SegFormer, so this returns the
+        ``ade20k_segmentation`` block. Centralizing it means the reasoner,
+        stairs detector, and depth proxy all read the label set that matches
+        the model's outputs.
+        """
+        full = self.yaml_config()
+        block = full.get("ade20k_segmentation")
+        if block:
+            return block
+        return full.get("segmentation", {})
+
     @property
     def map_destination_set(self) -> bool:
         return self.dest_lat is not None and self.dest_lon is not None
@@ -148,7 +172,7 @@ def apply_fast_profile(settings: Settings) -> Settings:
             "frame_height": 240,
             "inference_width": 256,
             "inference_height": 192,
-            "yolo_imgsz": 256,
+            "inference_imgsz": 256,
             "process_every_n_frames": 3,
             "target_fps": 24,
             "use_llm": False,

@@ -21,7 +21,7 @@ from navigation.output.hud import draw_navigation_hud
 from navigation.output.tts import SpeechEngine
 from navigation.output.validator import CommandValidator
 from navigation.perception.depth import UniDepthEstimator
-from navigation.perception.segmentation import YoloSegmenter
+from navigation.perception.segmentation_base import build_segmenter
 from navigation.perception.visualize import render_overlay
 from navigation.reasoning.care import CareNavigator
 from navigation.reasoning.llm import NavigationInterpreter
@@ -104,7 +104,7 @@ def process_video(
             "dest_lon": dest_coords[1],
         })
     
-    segmenter = YoloSegmenter(settings)
+    segmenter = build_segmenter(settings)
     depth_est = UniDepthEstimator(settings)
     care = CareNavigator(settings)
     interpreter = NavigationInterpreter(settings)
@@ -130,9 +130,9 @@ def process_video(
                 continue
             
             # Run navigation pipeline
-            seg = segmenter.predict(frame, dry_run=False)
-            depth = depth_est.predict(frame, dry_run=True, segmentation=seg)
-            care_out = care.predict(frame, seg, depth, dry_run=False)
+            seg = segmenter.predict(frame)
+            depth = depth_est.predict(frame, segmentation=seg)
+            care_out = care.predict(frame, seg, depth)
             
             bundle = PerceptionBundle(
                 frame_id=frame_id,
@@ -141,7 +141,7 @@ def process_video(
                 care=care_out,
             )
             
-            decision = interpreter.interpret(bundle, dry_run=False)
+            decision = interpreter.interpret(bundle)
             decision = validator.approve(decision)
             
             # Speak if needed
@@ -169,7 +169,7 @@ def process_video(
             
             # Render overlay if showing or saving
             if show or save_dir or video_writer:
-                overlay = render_overlay(frame, segmenter=segmenter, dry_run=False)
+                overlay = render_overlay(frame, segmenter=segmenter)
                 overlay = draw_navigation_hud(
                     overlay,
                     phrase=record["phrase"],

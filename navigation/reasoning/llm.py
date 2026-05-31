@@ -91,10 +91,9 @@ class NavigationInterpreter:
         self,
         bundle: PerceptionBundle,
         *,
-        dry_run: bool = False,
         position: Position | None = None,
     ) -> NavigationDecision:
-        if dry_run or not self.settings.use_llm:
+        if not self.settings.use_llm:
             return self._heuristic(bundle, position=position)
         return self._llm(bundle, position=position)
 

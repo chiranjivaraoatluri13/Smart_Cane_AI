@@ -116,5 +116,5 @@ def test_obstacle_overrides_map_guidance(sample_route):
         depth=DepthResult(obstacle_depth_m=0.5),
         care=CareResult(hazard_detected=True, safety_score=0.2),
     )
-    decision = interp.interpret(bundle, dry_run=True)
+    decision = interp.interpret(bundle)
     assert decision.command == NavigationCommand.STOP

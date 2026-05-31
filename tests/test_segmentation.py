@@ -1,50 +1,54 @@
-"""Tests for semantic segmentation parsing (no GPU weights)."""
+"""Tests for semantic segmentation parsing (SegFormer / ADE20K, no model download).
+
+These drive the real ``_parse_class_map`` path with a synthetic class map and
+an injected ``id_to_name``, so they exercise the production parsing logic
+without needing the transformers model weights.
+"""
 
 from __future__ import annotations
-
-from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import numpy as np
 
 from navigation.config import Settings
-from navigation.perception.segmentation import YoloSegmenter, is_semantic_model
+from navigation.perception.segmentation_segformer import SegformerSegmenter
 
 
-def test_is_semantic_model() -> None:
-    assert is_semantic_model("yolo26n-sem.pt")
-    assert is_semantic_model("models/yolo11n-sem.pt")
-    assert not is_semantic_model("yolo26n-seg.pt")
+def _segmenter() -> SegformerSegmenter:
+    seg = SegformerSegmenter(Settings())
+    # ADE20K-style labels: floor walkable, person obstacle.
+    seg._id_to_name = {0: "floor", 1: "person"}
+    return seg
 
 
 def test_parse_semantic_class_map_counts() -> None:
-    settings = Settings(yolo_model_path="yolo26n-sem.pt")
-    segmenter = YoloSegmenter(settings)
+    segmenter = _segmenter()
 
     class_map = np.array(
         [
             [0, 0, 1, 1],
-            [11, 11, 1, 1],
+            [1, 1, 1, 1],
         ],
         dtype=np.int32,
     )
-    names = {0: "road", 1: "sidewalk", 11: "person"}
-    sem = SimpleNamespace(data=MagicMock())
-    sem.data.cpu.return_value.numpy.return_value = class_map
-    result = SimpleNamespace(names=names, semantic_mask=sem)
-    seg = segmenter._parse_semantic([result])
+    seg = segmenter._parse_class_map(class_map, 2, 4)
 
     assert seg.class_map is not None
-    assert seg.obstacle_pixels == 2
+    assert seg.obstacle_pixels == 6  # six "person" pixels
     assert seg.walkable_ratio > 0
-    assert "road" in seg.class_names
+    assert "floor" in seg.class_names
+    assert "person" in seg.class_names
     assert seg.metadata.get("semantic") is True
+    assert seg.metadata.get("backend") == "segformer"
 
 
-def test_mock_dry_run_semantic_metadata() -> None:
-    settings = Settings(yolo_model_path="yolo26n-sem.pt")
-    segmenter = YoloSegmenter(settings)
-    frame = np.zeros((32, 48, 3), dtype=np.uint8)
-    seg = segmenter.predict(frame, dry_run=True)
-    assert seg.metadata.get("mock") is True
-    assert seg.metadata.get("semantic") is True
+def test_parse_populates_per_side_fields() -> None:
+    segmenter = _segmenter()
+    class_map = np.zeros((10, 30), dtype=np.int32)
+    class_map[5:, :] = 0          # floor in the bottom
+    class_map[:5, 10:20] = 1      # person in top-center
+    seg = segmenter._parse_class_map(class_map, 10, 30)
+
+    assert seg.per_side_class_pixels is not None
+    assert seg.per_side_walkable_ratio is not None
+    # id_to_name is carried in metadata for the overlay / depth proxy.
+    assert seg.metadata["id_to_name"] == {0: "floor", 1: "person"}

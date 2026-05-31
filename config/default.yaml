@@ -1,57 +1,59 @@
-# Cityscapes 19-class semantic segmentation (yolo26n-sem.pt / yolo11n-sem.pt)
-# Class order matches Ultralytics cityscapes.yaml — keep names identical when fine-tuning.
+# Semantic segmentation class groupings.
+#
+# The active backend is an ADE20K-trained SegFormer (150 classes), so the
+# ``ade20k_segmentation`` block below is what drives walkable / obstacle /
+# hazard decisions. The small ``segmentation`` block is a generic fallback
+# used only if the ADE20K block is ever absent.
 segmentation:
-  cityscapes_classes:
+  walkable_classes: [floor, road, sidewalk, path]
+  obstacle_classes: [person, wall, building, door, car, fence, pole]
+  hazard_classes: [stairs, step]
+
+# ADE20K 150-class semantic segmentation (SegFormer, the active backend).
+# Names are the first synonym of each ADE20K label (e.g. "sidewalk;pavement" -> "sidewalk",
+# "person;individual;..." -> "person", "stairs;steps" -> "stairs"). The SegformerSegmenter
+# normalizes model.config.id2label the same way, so these match at runtime.
+# ADE20K covers indoor + outdoor surfaces (floor, wall, door, stairs) — that
+# coverage is what removes the closed-set hallucination when the camera sees a
+# hallway or an empty path.
+ade20k_segmentation:
+  walkable_classes:
+    - floor
     - road
     - sidewalk
-    - building
+    - earth
+    - path
+    - rug
+    - runway
+    - field
+  obstacle_classes:
+    - person
+    - car
+    - bus
+    - truck
+    - van
+    - bicycle
+    - minibike
+    - chair
+    - table
+    - sofa
+    - plant
+    - column
+    - pole
+    - railing
+    - bannister
+    - fence
+    - bench
+    - signboard
+    - streetlight
     - wall
-    - fence
-    - pole
-    - traffic light
-    - traffic sign
-    - vegetation
-    - terrain
-    - sky
-    - person
-    - rider
-    - car
-    - truck
-    - bus
-    - train
-    - motorcycle
-    - bicycle
-
-  road_classes: [road]
-  walkable_classes: [sidewalk, terrain, road]
-  obstacle_classes:
-    - person
-    - rider
-    - car
-    - truck
-    - bus
-    - train
-    - motorcycle
-    - bicycle
-    - pole
-    - fence
-  hazard_classes: [wall, fence, pole]
-
-# COCO 80-class instance segmentation (yolo26n-seg.pt / yolo11n-seg.pt)
-# Used when YOLO_MODEL_PATH ends in -seg.pt. These are the classes the
-# COCO model produces — everyday objects at human eye-level, much more
-# accurate for pedestrian-perspective obstacle detection than Cityscapes.
-coco_segmentation:
-  obstacle_classes:
-    - person
-    - bicycle
-    - car
-    - motorcycle
-    - bus
-    - truck
-    - train
-  # COCO has no "sidewalk" class — treat any unmasked ground as walkable.
-  walkable_classes: []
+    - building
+    - door
+  hazard_classes:
+    - stairs
+    - stairway
+    - escalator
+    - step
 
 # Allowed spoken commands (LLM must pick from this set)
 commands:

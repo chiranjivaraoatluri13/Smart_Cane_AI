@@ -19,6 +19,45 @@ Build a native Android app using TensorFlow Lite or ONNX
 
 ---
 
+## 🧭 On-device depth (Depth Anything V2 in the browser)
+
+The client-server build (Option 2) now runs a **real monocular depth network on
+the phone itself**, in the browser, instead of the server's geometric depth
+proxy. This gives true "how far is the obstacle?" distances without needing a
+hosted GPU.
+
+**How it works**
+- `phone_client.html` loads [`@huggingface/transformers`](https://huggingface.co/docs/transformers.js)
+  and the `onnx-community/depth-anything-v2-small` model, running on **WebGPU**
+  (falls back to WASM on browsers without WebGPU).
+- On every `DEPTH_EVERY_N`th frame, the phone estimates depth, reads the nearest
+  object in the center-bottom walking band, converts it to an approximate
+  distance in meters, and posts it as the `depth_m` form field.
+- The server feeds `depth_m` straight into `bucketize()` (the existing
+  immediate/near/mid/far distance phrasing) via
+  `UniDepthEstimator.predict(external_depth_m=...)`.
+- If `depth_m` is missing (model still loading, WebGPU unsupported, older phone),
+  the server **automatically falls back to the geometric proxy** — nothing breaks.
+
+**Calibration** — Depth Anything outputs *relative* depth normalized per frame,
+so meters are approximate. Tune these constants in the `<script type="module">`
+block of `phone_client.html`:
+- `DEPTH_CALIBRATION` — multiplicative scale; stand a known distance from a wall,
+  open the on-screen DBG panel, read the logged `depth Xm`, and adjust so it
+  matches reality.
+- `DEPTH_MIN_M` / `DEPTH_MAX_M` — clamp range for the spoken distance buckets.
+- `DEPTH_EVERY_N` — run depth on 1 of every N frames to bound latency.
+
+**Requirements / caveats**
+- Must be served over **HTTPS** (already required for camera access).
+- **WebGPU**: Chrome/Edge on Android works well; **iOS Safari** support is newer
+  (Safari 18+) and may be limited — the WASM fallback or the proxy covers it.
+- First load downloads ~25-50 MB of model weights (cached afterward).
+- The `/process_frame` JSON response includes `depth_source: "client" | "proxy"`
+  so you can confirm which path is active.
+
+---
+
 # 📱 **OPTION 1: Termux + Python (Android)**
 
 ## ✅ **Advantages:**

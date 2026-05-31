@@ -219,17 +219,18 @@ class AlertTracker:
     def _weighted_counts_per_category(
         segmentation: SegmentationResult,
     ) -> dict[str, float]:
-        """Convert per-class pixel info into per-category weighted counts."""
-        meta = segmentation.metadata or {}
-        if not meta.get("semantic"):
-            return _instance_counts(segmentation)
+        """Convert per-class pixel info into per-category weighted counts.
 
+        The only segmentation backend is semantic (ADE20K SegFormer), so this
+        always reads the dense ``class_map``.
+        """
+        meta = segmentation.metadata or {}
         class_map = segmentation.class_map
         id_to_name = {int(k): str(v) for k, v in (meta.get("id_to_name") or {}).items()}
         if class_map is None or not id_to_name:
             return {}
 
-        from navigation.perception.segmentation import _region_weight_map
+        from navigation.perception.segmentation_base import _region_weight_map
 
         cm = np.asarray(class_map)
         if cm.ndim == 3:
@@ -246,30 +247,6 @@ class AlertTracker:
             weighted = float(weights[mask].sum())
             per_category[category] = per_category.get(category, 0.0) + weighted
         return per_category
-
-
-def _instance_counts(segmentation: SegmentationResult) -> dict[str, float]:
-    """Per-category weighted counts for instance-segmentation models."""
-    if not segmentation.masks:
-        return {}
-    from navigation.perception.segmentation import _region_weight_map
-
-    per_category: dict[str, float] = {}
-    for name, mask in zip(segmentation.class_names, segmentation.masks):
-        category = CLASS_TO_CATEGORY.get(name)
-        if category is None:
-            continue
-        m = np.asarray(mask)
-        if m.ndim == 3:
-            m = m[0]
-        if m.size == 0:
-            continue
-        weights = _region_weight_map(m.shape[:2])
-        binary = m > 0.5 if m.dtype != bool else m
-        per_category[category] = (
-            per_category.get(category, 0.0) + float(weights[binary].sum())
-        )
-    return per_category
 
 
 __all__ = [

@@ -115,7 +115,10 @@ def detailed_latency_analysis(video_path, max_frames=50):
             trend_time = (time.perf_counter() - t0) * 1000
             timings["trend"].append(trend_time)
             
-            # Spatial reasoner
+            # Spatial reasoner (no stairs — SegFormer handles that)
+            from navigation.reasoning.facts import StairsResult
+            stairs = StairsResult(False, 0.0, "")
+            
             t0 = time.perf_counter()
             decision, facts = spatial_reasoner.decide(
                 seg, depth, care_out, None,
@@ -219,28 +222,24 @@ def detailed_latency_analysis(video_path, max_frames=50):
     
     recommendations = []
     
-    if component_times["segmentation"] > 100:
+    if component_times.get("segmentation", 0) > 100:
         recommendations.append("❌ SEGMENTATION is the main bottleneck (>100ms)")
         recommendations.append("   → Reduce INFERENCE_IMGSZ to 192 or 128")
         recommendations.append("   → Or use a smaller model (SegFormer-B0 vs B1/B2)")
     
-    if component_times["depth"] > 50:
+    if component_times.get("depth", 0) > 50:
         recommendations.append("❌ DEPTH estimation is slow (>50ms)")
-        recommendations.append("   → Skip depth estimation, use segmentation proxy only")
+        recommendations.append("   → Pass depth_est=None to skip it")
     
-    if component_times["stairs"] > 30:
-        recommendations.append("❌ STAIRS detection is slow (>30ms)")
-        recommendations.append("   → Disable stairs detection (STAIRS_ENABLED=false)")
-    
-    if component_times["trend"] > 20:
+    if component_times.get("trend", 0) > 20:
         recommendations.append("❌ TREND tracking is slow (>20ms)")
         recommendations.append("   → Disable trend tracking")
     
-    if component_times["alerts"] > 20:
+    if component_times.get("alerts", 0) > 20:
         recommendations.append("❌ ALERTS processing is slow (>20ms)")
         recommendations.append("   → Already disabled on cloud (ALERTS_ENABLED=false)")
     
-    if component_times["composer"] > 20:
+    if component_times.get("composer", 0) > 20:
         recommendations.append("❌ COMPOSER is slow (>20ms)")
         recommendations.append("   → Simplify phrase composition")
     

@@ -213,11 +213,16 @@ def process_frame(
         timings["seg"] = (_t() - t0) * 1000
 
     t0 = _t() if bench else 0.0
-    depth = depth_est.predict(
-        frame,
-        segmentation=seg,
-        external_depth_m=client_depth_m,
-    )
+    if depth_est is not None:
+        depth = depth_est.predict(
+            frame,
+            segmentation=seg,
+            external_depth_m=client_depth_m,
+        )
+    else:
+        # Depth skipped on cloud — use a safe default (mid-range)
+        from navigation.models import DepthResult
+        depth = DepthResult(center_depth_m=2.0, obstacle_depth_m=2.0, min_depth_m=1.5)
     if bench:
         timings["depth"] = (_t() - t0) * 1000
 
@@ -459,7 +464,6 @@ def run_live(
         composer,
         voice_queue,
         trend,
-        stairs,
     ) = _build_pipeline_components(settings)
     tts.warmup()
     _warmup_segmenter(segmenter, settings)
@@ -486,7 +490,6 @@ def run_live(
                             composer=composer,
                             voice_queue=voice_queue,
                             trend_tracker=trend,
-                            stairs_detector=stairs,
                             use_legacy_reasoner=use_legacy_reasoner,
                             show_seg=show_seg,
                             seg_save_dir=seg_save_dir,
@@ -537,7 +540,6 @@ def run_image(
         composer,
         voice_queue,
         trend,
-        stairs,
     ) = _build_pipeline_components(settings)
     tts.warmup()
     _warmup_segmenter(segmenter, settings)
@@ -559,7 +561,6 @@ def run_image(
             composer=composer,
             voice_queue=voice_queue,
             trend_tracker=trend,
-            stairs_detector=stairs,
             use_legacy_reasoner=use_legacy_reasoner,
             show_seg=show_seg,
             seg_save_dir=seg_save_dir,

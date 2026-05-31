@@ -643,11 +643,13 @@
 
             frameCount++;
 
+            // ── Capture at 320×240 — server runs at 256×256 anyway ──
+            // 320×240 JPEG ≈ 15KB vs 640×480 ≈ 50KB = 3x less upload data
             const canvas = document.createElement('canvas');
-            canvas.width  = 640;
-            canvas.height = 480;
+            canvas.width  = 320;
+            canvas.height = 240;
             const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, 640, 480);
+            ctx.drawImage(video, 0, 0, 320, 240);
 
             // Fire-and-forget on-device depth on every Nth frame. It updates
             // `lastDepthM` for subsequent frames rather than blocking this one.
@@ -662,6 +664,7 @@
                 if (lastHeading           != null) formData.append('heading',  String(lastHeading));
                 if (lastDepthM            != null) formData.append('depth_m',  String(lastDepthM));
 
+                const t0 = Date.now();
                 try {
                     const response = await fetch(SERVER_URL + '/process_frame', {
                         method: 'POST',
@@ -671,6 +674,7 @@
                     if (!response.ok) throw new Error('Server error: ' + response.status);
 
                     const result = await response.json();
+                    const rtt = Date.now() - t0;
 
                     // ── Command text ──
                     commandDiv.textContent = result.phrase;
@@ -725,6 +729,7 @@
                     }
 
                     connStatus.classList.add('connected');
+                    dbg(`rtt=${rtt}ms server=${result.processing_time_ms}ms cmd=${result.command}`);
 
                 } catch (error) {
                     console.error('Processing error:', error);
@@ -733,8 +738,11 @@
                     connStatus.classList.remove('connected');
                 }
 
-                setTimeout(processFrame, 300);
-            }, 'image/jpeg', 0.8);
+                // ── No fixed delay — fire next frame immediately after response ──
+                // This means latency = network RTT + server processing only.
+                // No extra 300ms wait added on top.
+                if (isRunning) processFrame();
+            }, 'image/jpeg', 0.7);  // 0.7 quality = smaller file, faster upload
         }
 
         // ============================================================

@@ -59,7 +59,6 @@ from navigation.maps.router import geocode_address
 from navigation.models import Position
 from navigation.output.validator import CommandValidator
 from navigation.output.voice_queue import VoiceQueue
-from navigation.perception.depth import UniDepthEstimator
 from navigation.perception.segmentation_base import build_segmenter
 from navigation.output.tts import SpeechEngine
 from navigation.reasoning.alerts import AlertTracker
@@ -94,6 +93,7 @@ print("Models loaded! Cloud server ready.")
 frame_id = 0
 last_process_time = 0
 _pipeline_lock = threading.Lock()
+_is_processing = False  # non-blocking busy flag
 
 
 def _optional_float(value):

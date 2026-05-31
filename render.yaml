@@ -9,9 +9,15 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: SEGMENTER_BACKEND
-        value: segformer
+        value: segformer_onnx
       - key: SEGFORMER_MODEL_ID
         value: nvidia/segformer-b0-finetuned-ade-512-512
+      - key: SEGFORMER_DEVICE
+        value: cpu
+      - key: SEGFORMER_ONNX_PATH
+        value: segformer_b0_ade20k_int8.onnx
+      - key: INFERENCE_IMGSZ
+        value: "0"
       - key: TTS_ENABLED
         value: "false"
       - key: USE_LLM
@@ -34,3 +40,5 @@ services:
         value: "1500.0"
       - key: ALERT_MAX_SIMULTANEOUS_CATEGORIES
         value: "2"
+      - key: USE_MAP_GUIDANCE
+        value: "true"

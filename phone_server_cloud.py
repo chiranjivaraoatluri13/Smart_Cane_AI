@@ -115,7 +115,15 @@ def _no_cache(response):
 
 @app.route("/")
 def index():
-    return _no_cache(send_from_directory(".", "phone_client.html"))
+    # Serve phone_client.html from the project root
+    html_path = _project_root / "phone_client.html"
+    if html_path.is_file():
+        with open(html_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        response = app.make_response(content)
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        return _no_cache(response)
+    return jsonify({"error": "phone_client.html not found"}), 404
 
 
 @app.route("/health", methods=["GET"])

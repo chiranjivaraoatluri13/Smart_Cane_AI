@@ -1,10 +1,11 @@
-# Cloud deployment requirements — ADE20K SegFormer via transformers.
-# NOTE: torch + transformers are heavy; prefer the SegFormer-B0 checkpoint
-# (SEGFORMER_MODEL_ID=nvidia/segformer-b0-finetuned-ade-512-512) and a host
-# with enough RAM. The free 512MB tier is not sufficient for this stack.
+# Cloud deployment requirements — ADE20K SegFormer via ONNX (fast CPU inference).
+# NOTE: onnxruntime is required for the ONNX backend. transformers is kept as
+# fallback when ONNX model is not available. The free 512MB tier is not
+# sufficient for this stack; use Standard (2GB) or higher.
 flask>=3.0
 numpy>=1.26
 opencv-python-headless>=4.9
+onnxruntime>=1.18
 torch>=2.1
 transformers>=4.42
 pillow>=10.0

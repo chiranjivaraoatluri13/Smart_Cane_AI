@@ -124,7 +124,7 @@ def test_search_places_mocked():
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert "nominatim.openstreetmap.org" in str(request.url)
-        assert "limit=5" in str(request.url)
+        assert "limit=" in str(request.url)
         return httpx.Response(
             200,
             json=[
@@ -147,6 +147,51 @@ def test_search_places_mocked():
     assert len(rows) == 2
     assert rows[0].display_name.startswith("Times Square")
     assert rows[0].lat == pytest.approx(40.7580)
+
+
+def test_search_places_nearby_uses_viewbox():
+    from navigation.maps.router import _normalize_search_query, search_places
+
+    assert _normalize_search_query("subway, tempe") == "subway tempe"
+
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if "/reverse" in str(request.url):
+            return httpx.Response(
+                200,
+                json={
+                    "address": {"city": "Tempe", "state": "Arizona"},
+                },
+            )
+        if "bounded=1" in str(request.url):
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "lat": "33.4255",
+                        "lon": "-111.9400",
+                        "display_name": "Subway, Tempe, Arizona",
+                    },
+                ],
+            )
+        return httpx.Response(200, json=[])
+
+    transport = httpx.MockTransport(handler)
+    tempe_lat, tempe_lon = 33.4255, -111.9400
+    with httpx.Client(transport=transport, headers={"User-Agent": "test"}) as client:
+        rows = search_places(
+            "subway",
+            near_lat=tempe_lat,
+            near_lon=tempe_lon,
+            client=client,
+        )
+    assert len(rows) == 1
+    assert "Subway" in rows[0].display_name
+    assert rows[0].distance_m is not None
+    assert rows[0].distance_m < 500
+    assert any("viewbox=" in c for c in calls)
 
 
 def test_next_route_cue_off_route(sample_route):

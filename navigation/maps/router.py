@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_OSRM = "https://router.project-osrm.org/route/v1/foot"
 OSRM_BASE = os.environ.get("OSRM_BASE_URL", _DEFAULT_OSRM).rstrip("/")
 NOMINATIM_SEARCH = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_REVERSE = "https://nominatim.openstreetmap.org/reverse"
 USER_AGENT = "assistive-navigation/0.1 (MVP; local demo)"
 
 
@@ -154,65 +156,255 @@ class PlaceSuggestion:
     display_name: str
     lat: float
     lon: float
+    distance_m: float | None = None
+
+
+def _normalize_search_query(query: str) -> str:
+    """Turn 'subway, tempe' into 'subway tempe' for Nominatim."""
+    q = re.sub(r"\s+", " ", query.strip())
+    q = re.sub(r"\s*,\s*", " ", q)
+    return q.strip()
+
+
+def _viewbox_around(
+    lat: float, lon: float, radius_km: float
+) -> tuple[float, float, float, float]:
+    """Nominatim viewbox: min_lon, max_lat, max_lon, min_lat."""
+    cos_lat = max(math.cos(math.radians(lat)), 0.01)
+    dlat = radius_km / 110_540.0
+    dlon = radius_km / (111_320.0 * cos_lat)
+    return (lon - dlon, lat + dlat, lon + dlon, lat - dlat)
+
+
+def _nominatim_get(
+    url: str,
+    params: dict[str, str | int | float],
+    *,
+    client: httpx.Client,
+) -> list[dict[str, Any]]:
+    headers = {"User-Agent": USER_AGENT}
+    resp = client.get(url, params=params, headers=headers)
+    resp.raise_for_status()
+    data = resp.json()
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        return [data]
+    return []
+
+
+def _reverse_locality(
+    lat: float,
+    lon: float,
+    *,
+    client: httpx.Client,
+) -> str | None:
+    """Best-effort city/town label for biasing vague POI searches."""
+    rows = _nominatim_get(
+        NOMINATIM_REVERSE,
+        {
+            "lat": lat,
+            "lon": lon,
+            "format": "json",
+            "zoom": 12,
+            "addressdetails": 1,
+        },
+        client=client,
+    )
+    if not rows:
+        return None
+    address = rows[0].get("address") or {}
+    if not isinstance(address, dict):
+        return None
+    parts: list[str] = []
+    for key in ("city", "town", "village", "municipality", "county"):
+        val = address.get(key)
+        if val and str(val) not in parts:
+            parts.append(str(val))
+    state = address.get("state")
+    if state and str(state) not in parts:
+        parts.append(str(state))
+    return ", ".join(parts) if parts else None
+
+
+def _rows_to_suggestions(
+    rows: list[dict[str, Any]],
+    *,
+    near_lat: float | None = None,
+    near_lon: float | None = None,
+) -> list[PlaceSuggestion]:
+    out: list[PlaceSuggestion] = []
+    for row in rows:
+        try:
+            lat = float(row["lat"])
+            lon = float(row["lon"])
+            dist = (
+                distance_meters(near_lat, near_lon, lat, lon)
+                if near_lat is not None and near_lon is not None
+                else None
+            )
+            out.append(
+                PlaceSuggestion(
+                    display_name=str(row["display_name"]),
+                    lat=lat,
+                    lon=lon,
+                    distance_m=dist,
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    if near_lat is not None and near_lon is not None:
+        out.sort(key=lambda p: p.distance_m if p.distance_m is not None else float("inf"))
+    return out
 
 
 def search_places(
     query: str,
     *,
     limit: int = 5,
+    near_lat: float | None = None,
+    near_lon: float | None = None,
+    radius_km: float = 25.0,
     client: httpx.Client | None = None,
 ) -> list[PlaceSuggestion]:
-    """Return address suggestions for autocomplete (Nominatim)."""
-    q = query.strip()
+    """Return address suggestions for autocomplete (Nominatim).
+
+    When ``near_lat``/``near_lon`` are set, results are biased to a local
+    viewbox and ranked by distance — needed for vague queries like "subway".
+    """
+    q = _normalize_search_query(query)
     if len(q) < 2:
         return []
-    params = {"q": q, "format": "json", "limit": max(1, min(limit, 10))}
+
+    fetch_limit = max(limit * 2, 10)
     headers = {"User-Agent": USER_AGENT}
     own_client = client is None
     if own_client:
         client = httpx.Client(timeout=15.0, headers=headers)
+
+    seen: set[tuple[float, float]] = set()
+    merged: list[PlaceSuggestion] = []
+
+    def _collect(rows: list[dict[str, Any]]) -> None:
+        for item in _rows_to_suggestions(
+            rows, near_lat=near_lat, near_lon=near_lon
+        ):
+            key = (round(item.lat, 5), round(item.lon, 5))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+
+    def _search(params: dict[str, str | int | float]) -> None:
+        if len(merged) >= fetch_limit:
+            return
+        base = {
+            "format": "json",
+            "limit": fetch_limit,
+            "addressdetails": 0,
+        }
+        base.update(params)
+        rows = _nominatim_get(NOMINATIM_SEARCH, base, client=client)
+        _collect(rows)
+
     try:
-        resp = client.get(NOMINATIM_SEARCH, params=params, headers=headers)
-        resp.raise_for_status()
-        rows = resp.json()
+        if near_lat is not None and near_lon is not None:
+            min_lon, max_lat, max_lon, min_lat = _viewbox_around(
+                near_lat, near_lon, radius_km
+            )
+            viewbox = f"{min_lon},{max_lat},{max_lon},{min_lat}"
+
+            # Strict local search first — best for "subway", "starbucks", etc.
+            _search({"q": q, "viewbox": viewbox, "bounded": 1})
+
+            # Same viewbox but allow matches outside if nothing local.
+            if len(merged) < limit:
+                _search({"q": q, "viewbox": viewbox, "bounded": 0})
+
+            # Append city/state from reverse geocode when query has no place name.
+            locality = _reverse_locality(near_lat, near_lon, client=client)
+            if locality and locality.lower() not in q.lower() and len(merged) < limit:
+                _search({"q": f"{q} {locality}", "viewbox": viewbox, "bounded": 1})
+
+        # Global fallback (or primary when no GPS).
+        if len(merged) < limit:
+            _search({"q": q})
     finally:
         if own_client:
             client.close()
-    out: list[PlaceSuggestion] = []
-    for row in rows:
-        try:
-            out.append(
-                PlaceSuggestion(
-                    display_name=str(row["display_name"]),
-                    lat=float(row["lat"]),
-                    lon=float(row["lon"]),
-                )
-            )
-        except (KeyError, TypeError, ValueError):
-            continue
-    return out
+
+    if near_lat is not None and near_lon is not None:
+        merged.sort(
+            key=lambda p: p.distance_m if p.distance_m is not None else float("inf")
+        )
+    return merged[: max(1, min(limit, 10))]
 
 
 def geocode_address(
     address: str,
     *,
+    near_lat: float | None = None,
+    near_lon: float | None = None,
     client: httpx.Client | None = None,
 ) -> tuple[float, float]:
     """Resolve an address to (lat, lon) via Nominatim."""
-    params = {"q": address, "format": "json", "limit": 1}
+    q = _normalize_search_query(address)
     headers = {"User-Agent": USER_AGENT}
     own_client = client is None
     if own_client:
         client = httpx.Client(timeout=20.0, headers=headers)
     try:
-        resp = client.get(NOMINATIM_SEARCH, params=params, headers=headers)
-        resp.raise_for_status()
-        rows = resp.json()
+        rows: list[dict[str, Any]] = []
+        if near_lat is not None and near_lon is not None:
+            min_lon, max_lat, max_lon, min_lat = _viewbox_around(
+                near_lat, near_lon, 25.0
+            )
+            viewbox = f"{min_lon},{max_lat},{max_lon},{min_lat}"
+            rows = _nominatim_get(
+                NOMINATIM_SEARCH,
+                {
+                    "q": q,
+                    "format": "json",
+                    "limit": 5,
+                    "viewbox": viewbox,
+                    "bounded": 1,
+                },
+                client=client,
+            )
+            if not rows:
+                locality = _reverse_locality(near_lat, near_lon, client=client)
+                if locality and locality.lower() not in q.lower():
+                    rows = _nominatim_get(
+                        NOMINATIM_SEARCH,
+                        {
+                            "q": f"{q} {locality}",
+                            "format": "json",
+                            "limit": 5,
+                            "viewbox": viewbox,
+                            "bounded": 1,
+                        },
+                        client=client,
+                    )
+        if not rows:
+            rows = _nominatim_get(
+                NOMINATIM_SEARCH,
+                {"q": q, "format": "json", "limit": 1},
+                client=client,
+            )
     finally:
         if own_client:
             client.close()
     if not rows:
         raise ValueError(f"No geocode result for: {address!r}")
+    if near_lat is not None and near_lon is not None and len(rows) > 1:
+        rows.sort(
+            key=lambda r: distance_meters(
+                near_lat,
+                near_lon,
+                float(r["lat"]),
+                float(r["lon"]),
+            )
+        )
     return float(rows[0]["lat"]), float(rows[0]["lon"])
 
 

@@ -136,6 +136,14 @@
             pointer-events: none;
         }
 
+        .suggestion-distance {
+            flex-shrink: 0;
+            margin-left: 8px;
+            font-size: 12px;
+            color: #666;
+            font-weight: 600;
+        }
+
         .suggestion-pin {
             flex-shrink: 0;
             margin-right: 10px;
@@ -461,6 +469,13 @@
             if (searchStatusEl) searchStatusEl.textContent = msg || '';
         }
 
+        function formatDistance(meters) {
+            if (meters == null || Number.isNaN(meters)) return '';
+            const feet = meters * 3.281;
+            if (feet < 1000) return Math.round(feet) + ' ft';
+            return (meters / 1609.34).toFixed(1) + ' mi';
+        }
+
         async function fetchSuggestions(query) {
             if (query.length < 2) {
                 hideSuggestions();
@@ -468,9 +483,13 @@
                 return;
             }
             const seq = ++_suggestSeq;
-            setSearchStatus('Searching…');
+            const hasGps = lastPosition.lat != null && lastPosition.lon != null;
+            setSearchStatus(hasGps ? 'Searching nearby…' : 'Searching… (allow GPS for nearby results)');
             try {
-                const url = `${SERVER_URL}/search_places?q=${encodeURIComponent(query)}`;
+                let url = `${SERVER_URL}/search_places?q=${encodeURIComponent(query)}`;
+                if (hasGps) {
+                    url += `&lat=${encodeURIComponent(lastPosition.lat)}&lon=${encodeURIComponent(lastPosition.lon)}`;
+                }
                 const r = await fetch(url);
                 const data = await r.json();
                 if (seq !== _suggestSeq) return;
@@ -544,6 +563,15 @@
 
                 item.appendChild(pin);
                 item.appendChild(label);
+
+                const distText = formatDistance(result.distance_m);
+                if (distText) {
+                    const dist = document.createElement('span');
+                    dist.className = 'suggestion-distance';
+                    dist.textContent = distText;
+                    item.appendChild(dist);
+                }
+
                 bindSuggestionItem(item, result);
                 suggestionsEl.appendChild(item);
             });
@@ -575,6 +603,10 @@
                 body.append('address', address || `${lat},${lon}`);
             } else {
                 body.append('address', address);
+                if (lastPosition.lat != null && lastPosition.lon != null) {
+                    body.append('near_lat', String(lastPosition.lat));
+                    body.append('near_lon', String(lastPosition.lon));
+                }
             }
             try {
                 const r = await fetch(SERVER_URL + '/set_destination', { method: 'POST', body });
@@ -617,11 +649,19 @@
                         }
                     }
                     prevGeoPoint = { lat, lon };
+                    const hadGps = lastPosition.lat != null;
                     lastPosition.lat      = lat;
                     lastPosition.lon      = lon;
                     lastPosition.accuracy = pos.coords.accuracy;
                     if (pos.coords.heading != null && !Number.isNaN(pos.coords.heading)) {
                         lastHeading = pos.coords.heading;
+                    }
+                    // Re-run search with GPS bias when location first arrives.
+                    if (!hadGps) {
+                        const q = searchInput.value.trim();
+                        if (q.length >= 2 && document.activeElement === searchInput) {
+                            fetchSuggestions(q);
+                        }
                     }
                 },
                 (err) => {

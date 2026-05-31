@@ -60,15 +60,19 @@ def test_search_places_proxies_nominatim(client):
     from navigation.maps.router import PlaceSuggestion
 
     fake = [
-        PlaceSuggestion("Empire State Building, NY", 40.7484, -73.9857),
+        PlaceSuggestion("Empire State Building, NY", 40.7484, -73.9857, 120.0),
     ]
-    with patch.object(phone_server, "search_places", return_value=fake):
-        rv = client.get("/search_places?q=empire")
+    with patch.object(phone_server, "search_places", return_value=fake) as mock_search:
+        rv = client.get("/search_places?q=empire&lat=40.75&lon=-73.99")
+    mock_search.assert_called_once()
+    assert mock_search.call_args.kwargs["near_lat"] == pytest.approx(40.75)
+    assert mock_search.call_args.kwargs["near_lon"] == pytest.approx(-73.99)
     assert rv.status_code == 200
     data = rv.get_json()
     assert data["ok"] is True
     assert len(data["results"]) == 1
     assert "Empire" in data["results"][0]["display_name"]
+    assert data["results"][0]["distance_m"] == pytest.approx(120.0)
 
 
 def test_search_places_short_query(client):

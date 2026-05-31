@@ -144,12 +144,19 @@ def search_places_endpoint():
     q = (request.args.get("q") or "").strip()
     if len(q) < 2:
         return jsonify({"ok": True, "results": []}), 200
+    near_lat = _optional_float(request.args.get("lat"))
+    near_lon = _optional_float(request.args.get("lon"))
     try:
-        rows = search_places(q, limit=5)
+        rows = search_places(q, limit=5, near_lat=near_lat, near_lon=near_lon)
         return jsonify({
             "ok": True,
             "results": [
-                {"display_name": p.display_name, "lat": p.lat, "lon": p.lon}
+                {
+                    "display_name": p.display_name,
+                    "lat": p.lat,
+                    "lon": p.lon,
+                    "distance_m": p.distance_m,
+                }
                 for p in rows
             ],
         }), 200
@@ -169,8 +176,12 @@ def set_destination():
     if dest_lat is not None and dest_lon is not None:
         lat, lon = dest_lat, dest_lon
     elif address:
+        near_lat = _optional_float(request.form.get("near_lat"))
+        near_lon = _optional_float(request.form.get("near_lon"))
         try:
-            lat, lon = geocode_address(address)
+            lat, lon = geocode_address(
+                address, near_lat=near_lat, near_lon=near_lon
+            )
         except ValueError:
             return jsonify({"ok": False, "error": "address_not_found"}), 422
         except Exception as e:

@@ -29,7 +29,7 @@ from navigation.models import (
     Side,
 )
 from navigation.output.distance import DistanceConfig, bucketize, load_distance_config
-from navigation.reasoning.alerts import CATEGORY_PRIORITY, CLASS_TO_CATEGORY
+from navigation.reasoning.hazard_labels import hazard_key_for_class, hazard_priority
 from navigation.reasoning.facts import (
     ApproachDirection,
     GuidanceFacts,
@@ -181,6 +181,10 @@ class SpatialReasoner:
             command = NavigationCommand.GO_FORWARD
             confidence = 0.75
             rationale = "route loading"
+        elif route_cue is not None and route_cue.turn == "failed":
+            command = NavigationCommand.GO_FORWARD
+            confidence = 0.75
+            rationale = "route fetch failed"
         elif route_cue is not None and route_cue.turn == "forward":
             command = NavigationCommand.GO_FORWARD
             confidence = 0.85
@@ -329,17 +333,21 @@ class SpatialReasoner:
         per_side = seg.per_side_class_pixels or {}
         if not isinstance(per_side, dict):
             return out
+        obstacle_set = self._obstacle_class_set()
+        hazard_set = self._hazard_class_set()
         for side in SIDES:
-            entries: dict[str, float] = {}  # category -> total weighted
+            entries: dict[str, float] = {}  # spoken label -> total weighted
             side_dict = per_side.get(side, {}) or {}
             for cls_name, weight in side_dict.items():
-                category = CLASS_TO_CATEGORY.get(cls_name)
+                category = hazard_key_for_class(
+                    cls_name, obstacle_set, hazard_set
+                )
                 if category is None:
                     continue
                 entries[category] = entries.get(category, 0.0) + float(weight)
             ranked = sorted(
                 entries.items(),
-                key=lambda kv: CATEGORY_PRIORITY.get(kv[0], 0),
+                key=lambda kv: hazard_priority(kv[0]),
                 reverse=True,
             )
             out[side] = [
@@ -358,12 +366,17 @@ class SpatialReasoner:
             walkable_by_side.get(s, 0.0) < self._min_lane_walkable for s in SIDES
         )
 
-    def _obstacle_class_set(self) -> set[str]:
+    def _seg_class_cfg(self) -> dict:
         try:
-            seg_cfg = self.settings.seg_class_config()
+            return self.settings.seg_class_config() or {}
         except Exception:
-            seg_cfg = {}
-        return set((seg_cfg or {}).get("obstacle_classes", []))
+            return {}
+
+    def _obstacle_class_set(self) -> set[str]:
+        return set(self._seg_class_cfg().get("obstacle_classes", []))
+
+    def _hazard_class_set(self) -> set[str]:
+        return set(self._seg_class_cfg().get("hazard_classes", []))
 
 
 __all__ = [

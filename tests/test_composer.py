@@ -244,6 +244,41 @@ def test_vision_stop_phrase_does_not_mention_turn():
     assert not re.search(r"\btake a (left|right)\b", low)
 
 
+def test_vision_stop_center_hazard_says_ahead_not_center():
+    composer = PhraseComposer(_settings(seed=0))
+    facts = _facts(
+        command=NavigationCommand.STOP,
+        vision_stop=True,
+        hazards_by_side={
+            "left": [],
+            "center": [HazardEntry(category="chair", weighted_pixels=900.0)],
+            "right": [],
+        },
+    )
+    phrase = composer.compose(facts)
+    low = phrase.lower()
+    assert "chair" in low
+    assert "ahead" in low
+    assert "center" not in low
+
+
+def test_vision_stop_side_hazard_names_position():
+    composer = PhraseComposer(_settings(seed=0))
+    facts = _facts(
+        command=NavigationCommand.STOP,
+        vision_stop=True,
+        hazards_by_side={
+            "left": [HazardEntry(category="pole", weighted_pixels=900.0)],
+            "center": [],
+            "right": [],
+        },
+    )
+    phrase = composer.compose(facts)
+    low = phrase.lower()
+    assert "pole" in low
+    assert "left" in low
+
+
 def test_destination_reached_phrase():
     composer = PhraseComposer(_settings())
     facts = _facts(

@@ -81,6 +81,22 @@ def test_search_places_short_query(client):
     assert rv.get_json()["results"] == []
 
 
+def test_reverse_geocode_endpoint(client):
+    with patch.object(phone_server, "reverse_geocode", return_value="Raising Canes, Tempe"):
+        rv = client.get("/reverse_geocode?lat=33.4224&lon=-111.9244")
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["ok"] is True
+    assert "Raising Canes" in data["display_name"]
+    assert data["lat"] == pytest.approx(33.4224)
+
+
+def test_reverse_geocode_missing_coords(client):
+    rv = client.get("/reverse_geocode?lat=33.0")
+    assert rv.status_code == 400
+    assert rv.get_json()["error"] == "missing_coordinates"
+
+
 def test_set_destination_400_on_missing(client):
     rv = client.post("/set_destination", data={})
     assert rv.status_code == 400
@@ -108,6 +124,45 @@ def test_set_destination_without_gps_defers_route_fetch(client):
     # MapGuidance instance is invalidated; next /process_frame with GPS will fetch.
     assert phone_server.interpreter._map_guidance is None
     assert phone_server.interpreter._map_route_attempted is False
+
+
+def test_set_destination_syncs_module_settings(client):
+    """Module-level settings must track interpreter after /set_destination."""
+    with patch.object(phone_server, "geocode_address", return_value=(33.4224, -111.9244)):
+        rv = client.post("/set_destination", data={"address": "Raising Canes Tempe"})
+    assert rv.status_code == 200
+    assert phone_server.interpreter.settings.use_map_guidance is True
+    assert phone_server.settings.use_map_guidance is True
+    assert phone_server.settings.dest_lat == pytest.approx(33.4224)
+
+
+def test_process_frame_uses_interpreter_settings_after_set_destination(client):
+    """process_frame must see use_map_guidance + dest from /set_destination."""
+    captured: list = []
+    original = phone_server.run_process_frame
+
+    def capture(*args, **kwargs):
+        captured.append(kwargs.get("settings"))
+        return original(*args, **kwargs)
+
+    with patch.object(phone_server, "run_process_frame", side_effect=capture):
+        with patch.object(phone_server, "geocode_address", return_value=(33.4224, -111.9244)):
+            rv = client.post("/set_destination", data={"address": "Raising Canes Tempe"})
+        assert rv.status_code == 200
+        data = {
+            "frame": (io.BytesIO(_jpeg_bytes()), "frame.jpg"),
+            "lat": "33.4255",
+            "lon": "-111.94",
+        }
+        rv = client.post("/process_frame", data=data, content_type="multipart/form-data")
+    assert rv.status_code == 200
+    assert captured, "process_frame was not invoked"
+    active = captured[-1]
+    assert active.use_map_guidance is True
+    assert active.dest_lat == pytest.approx(33.4224)
+    assert active.dest_lon == pytest.approx(-111.9244)
+    body = rv.get_json()
+    assert body["route_status"]["destination_set"] is True
 
 
 def test_set_destination_posts_address_form_field(client):

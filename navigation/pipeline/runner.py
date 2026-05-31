@@ -363,11 +363,16 @@ def _resolve_route_cue(
     )
     if pos is None or pos.lat is None or pos.lon is None:
         return None
+    # Destination/map flags live on interpreter.settings (updated by
+    # /set_destination). The module-level Settings passed to process_frame
+    # must match, but read the interpreter copy so route fetch cannot be
+    # skipped when those objects diverge.
+    map_settings = getattr(interpreter, "settings", settings)
     # Lazily fetch the route on the first frame that carries GPS. In the
     # spatial path interpreter.interpret() is never called, so we must
     # trigger the route fetch here — otherwise _map_guidance stays None and
     # the user never gets turn-by-turn directions.
-    if settings.use_map_guidance and hasattr(interpreter, "ensure_map_guidance"):
+    if map_settings.use_map_guidance and hasattr(interpreter, "ensure_map_guidance"):
         try:
             if getattr(interpreter, "is_route_loading", lambda: False)():
                 return RouteCue(
@@ -390,6 +395,17 @@ def _resolve_route_cue(
                 target_bearing_deg=0.0,
                 rationale="fetching route",
             )
+        if (
+            map_settings.use_map_guidance
+            and map_settings.map_destination_set
+            and getattr(interpreter, "_route_permanent_failure", False)
+        ):
+            return RouteCue(
+                turn="failed",
+                meters_to_turn=0.0,
+                target_bearing_deg=0.0,
+                rationale="route_failed",
+            )
         return None
 
     if hasattr(interpreter, "maybe_refetch_route"):
@@ -400,7 +416,7 @@ def _resolve_route_cue(
     heading = pos.heading_deg
     return _next_route_cue(
         map_guidance,
-        settings,
+        map_settings,
         current_lat=pos.lat,
         current_lon=pos.lon,
         heading_deg=heading,

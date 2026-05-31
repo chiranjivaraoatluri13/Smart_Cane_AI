@@ -55,7 +55,7 @@ print(f"sys.path[0]: {sys.path[0]}", flush=True)
 print(f"navigation package: {(_project_root / 'navigation' / '__init__.py').is_file()}", flush=True)
 
 from navigation.config import apply_cloud_profile, load_settings
-from navigation.maps.router import geocode_address, search_places
+from navigation.maps.router import geocode_address, reverse_geocode, search_places
 from navigation.models import Position
 from navigation.output.validator import CommandValidator
 from navigation.output.voice_queue import VoiceQueue
@@ -168,6 +168,28 @@ def search_places_endpoint():
         }), 502
 
 
+@app.route("/reverse_geocode", methods=["GET"])
+def reverse_geocode_endpoint():
+    lat = _optional_float(request.args.get("lat"))
+    lon = _optional_float(request.args.get("lon"))
+    if lat is None or lon is None:
+        return jsonify({"ok": False, "error": "missing_coordinates"}), 400
+    try:
+        label = reverse_geocode(lat, lon)
+        return jsonify({
+            "ok": True,
+            "display_name": label,
+            "lat": lat,
+            "lon": lon,
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": "reverse_unavailable",
+            "detail": str(e),
+        }), 502
+
+
 @app.route("/set_destination", methods=["POST"])
 def set_destination():
     address = (request.form.get("address") or "").strip()
@@ -189,10 +211,12 @@ def set_destination():
     else:
         return jsonify({"ok": False, "error": "missing_address"}), 400
 
+    global settings
     with _pipeline_lock:
         interpreter.settings = interpreter.settings.model_copy(
             update={"dest_lat": lat, "dest_lon": lon, "use_map_guidance": True}
         )
+        settings = interpreter.settings
         interpreter.reset_map_state()
 
     return jsonify({"ok": True, "lat": lat, "lon": lon, "address": address or f"{lat},{lon}"}), 200
@@ -228,7 +252,7 @@ def process_frame_endpoint():
             record = process_frame(
                 frame,
                 frame_id=frame_id,
-                settings=settings,
+                settings=interpreter.settings,
                 segmenter=segmenter,
                 depth_est=None,  # Skip depth estimation (saves 28ms)
                 care=care,
@@ -258,6 +282,12 @@ def process_frame_endpoint():
             "processing_time_ms": int(process_time * 1000),
             "fps": round(fps, 1),
             "alerts": record.get("alerts", []),
+            "route_status": {
+                "destination_set": interpreter.settings.map_destination_set,
+                "loading": interpreter.is_route_loading(),
+                "active": getattr(interpreter, "_map_guidance", None) is not None,
+                "failed": getattr(interpreter, "_route_permanent_failure", False),
+            },
         }
         if "facts" in record:
             response["facts"] = record["facts"]

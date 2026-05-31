@@ -19,7 +19,7 @@ from typing import Iterable
 
 from navigation.config import Settings
 from navigation.models import SIDES, Side
-from navigation.reasoning.alerts import CLASS_TO_CATEGORY
+from navigation.reasoning.hazard_labels import hazard_key_for_class
 from navigation.reasoning.facts import ApproachDirection
 
 # Normalized horizontal centers per side. Used to compute a centroid x
@@ -35,20 +35,25 @@ class _CategoryHistory:
 
 def per_side_to_per_category(
     per_side_class_pixels: dict[Side, dict[str, float]] | None,
+    *,
+    obstacle_classes: set[str] | None = None,
+    hazard_classes: set[str] | None = None,
 ) -> dict[str, tuple[float, float, float]]:
     """Aggregate `class -> weight` dicts (per side) into `category -> (l,c,r)`.
 
-    Classes whose names don't map to a known category (via
-    `CLASS_TO_CATEGORY`) are dropped.
+    Classes that are not configured obstacles/hazards are dropped.
     """
     out: dict[str, tuple[float, float, float]] = {}
     if not per_side_class_pixels:
         return out
 
+    obstacle = obstacle_classes or set()
+    hazard = hazard_classes or set()
+
     for side in SIDES:
         side_dict = per_side_class_pixels.get(side, {}) or {}
         for cls_name, weight in side_dict.items():
-            cat = CLASS_TO_CATEGORY.get(cls_name)
+            cat = hazard_key_for_class(cls_name, obstacle, hazard)
             if cat is None:
                 continue
             triple = list(out.get(cat, (0.0, 0.0, 0.0)))
@@ -93,7 +98,17 @@ class TrendTracker:
         value. This prevents "ghost" classifications from objects that
         have left the frame.
         """
-        per_category = per_side_to_per_category(per_side_class_pixels)
+        obstacle: set[str] = set()
+        hazard: set[str] = set()
+        if self.settings is not None:
+            cfg = self.settings.seg_class_config() or {}
+            obstacle = set(cfg.get("obstacle_classes", []))
+            hazard = set(cfg.get("hazard_classes", []))
+        per_category = per_side_to_per_category(
+            per_side_class_pixels,
+            obstacle_classes=obstacle,
+            hazard_classes=hazard,
+        )
         # Push known categories with the new sample; push zeros for any
         # category we've previously seen but isn't in this frame.
         seen = set(per_category.keys())

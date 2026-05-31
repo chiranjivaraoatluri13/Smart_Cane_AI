@@ -150,7 +150,38 @@ def test_combines_left_and_right_hazards():
     assert "bicycle" in cats_right
 
 
-def test_route_cue_merged_into_facts():
+def test_chair_hazard_named_on_side():
+    """Indoor obstacles like chair are spoken by name, not dropped."""
+    reasoner = SpatialReasoner(_settings())
+    seg = _seg(
+        per_side_class_pixels={
+            "left": {"chair": 700.0},
+            "center": {},
+            "right": {},
+        },
+        per_side_walkable_ratio={"left": 0.1, "center": 0.5, "right": 0.5},
+    )
+    care = CareResult(hazard_detected=False, safety_score=0.9, safe_direction_deg=0.0)
+    _, facts = reasoner.decide(seg, DepthResult(), care, None, stairs=_no_stairs())
+    cats_left = {h.category for h in facts.hazards_by_side["left"]}
+    assert "chair" in cats_left
+
+
+def test_steps_hazard_merged_from_stair_classes():
+    reasoner = SpatialReasoner(_settings())
+    seg = _seg(
+        per_side_class_pixels={
+            "left": {},
+            "center": {"stairs": 400.0, "step": 200.0},
+            "right": {},
+        },
+    )
+    care = CareResult(hazard_detected=False, safety_score=0.9, safe_direction_deg=0.0)
+    _, facts = reasoner.decide(seg, DepthResult(), care, None, stairs=_no_stairs())
+    center_cats = {h.category for h in facts.hazards_by_side["center"]}
+    assert center_cats == {"steps"}
+
+
     reasoner = SpatialReasoner(_settings())
     seg = _seg(
         per_side_walkable_ratio={"left": 0.3, "center": 0.6, "right": 0.6},

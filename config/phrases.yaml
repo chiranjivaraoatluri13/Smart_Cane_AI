@@ -9,7 +9,8 @@
 #
 # Placeholders the composer fills in:
 #   {distance_phrase}    e.g. "about 30 feet ahead", "right in front of you"
-#   {side}               left | center | right | ahead
+#   {side}               left | right | ahead
+#   {position_phrase}    ahead | on your left | on your right
 #   {opposite_side}      right | left | ahead
 #   {category}           person | car | bicycle | pole | ...
 #   {category_list}      "person, bicycle"
@@ -24,10 +25,10 @@ vision_stop_generic:
   - "Pause for a moment."
 
 vision_stop_with_cause:
-  - "Wait, there's a {category} {distance_phrase}."
-  - "Hold up — {category} ahead, {distance_phrase}."
-  - "Stop for now, {category} on your {side}."
-  - "Wait a moment, the path is blocked."
+  - "Wait, {category} {position_phrase}."
+  - "Hold up — {category} {distance_phrase}, {position_phrase}."
+  - "Stop for now, {category} {position_phrase}."
+  - "Wait a moment, {category} blocking the path {position_phrase}."
 
 directional_warning_simple:
   - "Take a {opposite_side}."
@@ -37,12 +38,12 @@ directional_warning_simple:
 directional_warning_with_freespace:
   - "Take a {opposite_side}, your {opposite_side} is clear."
   - "Step {opposite_side}, there's open space that way."
-  - "Move a little {opposite_side}; {category} on your {side}."
+  - "Move a little {opposite_side}; {category} {position_phrase}."
 
 approach_alert_static:
-  - "{category} {distance_phrase} on your {side}."
-  - "Heads up — {category} on your {side}, {distance_phrase}."
-  - "{category} ahead on your {side}, watch out."
+  - "{category} {position_phrase}, {distance_phrase}."
+  - "Heads up — {category} {position_phrase}."
+  - "{category} {position_phrase}, watch out."
 
 approach_alert_crossing:
   - "{category} crossing in front of you."
@@ -73,6 +74,10 @@ map_route_loading:
   - "Loading walking directions."
   - "Fetching your route, one moment."
 
+map_route_failed:
+  - "Walking route unavailable. Check your connection or try again."
+  - "Could not load walking directions. Try setting the destination again."
+
 status_update_clear:
   - "Path is clear, take a few steps forward."
   - "Open sidewalk ahead. Keep walking."
@@ -86,19 +91,19 @@ status_update_progress:
   - "Heading the right way. About {feet_to_turn} feet remaining."
 
 stairs_warning_low_conf:
-  - "There may be a step ahead — slow down."
-  - "Possible step coming up, take it easy."
-  - "Watch your step, possible curb ahead."
+  - "Steps may be ahead — slow down."
+  - "Possible steps coming up, take it easy."
+  - "Watch your step, steps may be ahead."
 
 stairs_warning_with_stop:
-  - "Wait — there's a step right in front of you."
-  - "Stop, there's a step here."
-  - "Hold up — stair edge ahead."
+  - "Wait — steps right in front of you."
+  - "Stop, steps ahead."
+  - "Hold up — steps ahead."
 
 lane_blocked_all_sides:
-  - "Path is blocked, slow down."
-  - "All paths are blocked. Wait a moment."
-  - "No clear path right now, slow down."
+  - "Path blocked by {category_list}, slow down."
+  - "{category_list} blocking the path. Wait a moment."
+  - "No clear path — {category_list} ahead, slow down."
 
 destination_reached:
   - "You've arrived."

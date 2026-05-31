@@ -37,6 +37,7 @@ _BUILTIN_FALLBACKS: dict[str, str] = {
     "map_turn_with_caution": "Turn ahead, slow down.",
     "map_off_route": "You're off the route. Step to your {turn_direction}.",
     "map_route_loading": "Loading walking directions…",
+    "map_route_failed": "Walking route unavailable. Check connection or try again.",
     "status_update_clear": "Path is clear ahead.",
     "status_update_progress": "On track.",
     "stairs_warning_low_conf": "Step ahead, slow down.",
@@ -127,6 +128,8 @@ class PhraseComposer:
             return "lane_blocked_all_sides"
         if facts.route_cue is not None and facts.route_cue.turn == "loading":
             return "map_route_loading"
+        if facts.route_cue is not None and facts.route_cue.turn == "failed":
+            return "map_route_failed"
         if facts.route_cue is not None and facts.route_cue.rationale.startswith("off_route"):
             return "map_off_route"
         if facts.route_cue is not None and facts.route_cue.turn in ("left", "right"):
@@ -161,16 +164,20 @@ class PhraseComposer:
         # Status update — system is going forward and nothing notable in view.
         return "status_update_clear"
 
+    def _side_label(self, side: str) -> str:
+        """Map frame region to spoken position (center → ahead)."""
+        return "ahead" if side == "center" else side
+
+    def _position_phrase(self, side: str) -> str:
+        if side == "center":
+            return "ahead"
+        return f"on your {side}"
+
     def _placeholders(self, facts: GuidanceFacts) -> dict[str, str]:
-        side = self._dominant_hazard_side(facts) or "ahead"
-        opposite = {
-            "left": "right",
-            "right": "left",
-            "center": "ahead",
-            "ahead": "ahead",
-        }[side]
+        side = self._dominant_hazard_side(facts) or "center"
+        opposite = {"left": "right", "right": "left", "center": "ahead"}[side]
         category_list = self._category_list(facts)
-        category = category_list[0] if category_list else "object"
+        category = category_list[0] if category_list else "obstacle"
         cat_list_str = ", ".join(category_list) if category_list else "the path"
         turn_direction = facts.route_cue.turn if facts.route_cue else "ahead"
         meters = facts.route_cue.meters_to_turn if facts.route_cue else 0.0
@@ -178,8 +185,9 @@ class PhraseComposer:
 
         return {
             "distance_phrase": facts.distance_phrase,
-            "side": side,
+            "side": self._side_label(side),
             "opposite_side": opposite,
+            "position_phrase": self._position_phrase(side),
             "category": category,
             "category_list": cat_list_str,
             "turn_direction": turn_direction,

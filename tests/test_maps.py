@@ -104,6 +104,51 @@ def test_fetch_route_mocked(sample_route):
     assert len(route.waypoints) == len(sample_route.waypoints)
 
 
+def test_resolve_route_cue_uses_interpreter_settings():
+    """Route fetch must not be skipped when module settings lag interpreter."""
+    from navigation.config import Settings
+    from navigation.models import Position
+    from navigation.pipeline.runner import _resolve_route_cue
+    from navigation.reasoning.llm import NavigationInterpreter
+
+    module_settings = Settings(use_map_guidance=False)
+    interp = NavigationInterpreter(module_settings)
+    interp.settings = module_settings.model_copy(
+        update={"use_map_guidance": True, "dest_lat": 33.42, "dest_lon": -111.92}
+    )
+    started = {"n": 0}
+    original = interp.ensure_map_guidance
+
+    def track(pos):
+        started["n"] += 1
+        original(pos)
+
+    interp.ensure_map_guidance = track  # type: ignore[method-assign]
+    pos = Position(lat=33.4255, lon=-111.94)
+    _resolve_route_cue(interp, module_settings, pos)
+    assert started["n"] == 1
+
+
+def test_resolve_route_cue_reports_failed():
+    """Permanent OSRM failure surfaces a failed route cue instead of silence."""
+    from navigation.config import Settings
+    from navigation.models import Position
+    from navigation.pipeline.runner import _resolve_route_cue
+    from navigation.reasoning.llm import NavigationInterpreter
+
+    settings = Settings(use_map_guidance=False)
+    interp = NavigationInterpreter(settings)
+    interp.settings = settings.model_copy(
+        update={"use_map_guidance": True, "dest_lat": 33.42, "dest_lon": -111.92}
+    )
+    interp._route_permanent_failure = True
+    interp._map_route_attempted = True
+    pos = Position(lat=33.4255, lon=-111.94)
+    cue = _resolve_route_cue(interp, settings, pos)
+    assert cue is not None
+    assert cue.turn == "failed"
+
+
 def test_geocode_mocked():
     def handler(request: httpx.Request) -> httpx.Response:
         assert "nominatim.openstreetmap.org" in str(request.url)
@@ -117,6 +162,30 @@ def test_geocode_mocked():
         lat, lon = geocode_address("Times Square", client=client)
     assert lat == pytest.approx(40.7580)
     assert lon == pytest.approx(-73.9855)
+
+
+def test_reverse_geocode_mocked():
+    from navigation.maps.router import reverse_geocode
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "nominatim.openstreetmap.org/reverse" in str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "display_name": "123 Main St, Tempe, AZ",
+                "address": {
+                    "house_number": "123",
+                    "road": "Main Street",
+                    "city": "Tempe",
+                },
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport, headers={"User-Agent": "test"}) as client:
+        label = reverse_geocode(33.42, -111.94, client=client)
+    assert "Main Street" in label
+    assert "Tempe" in label
 
 
 def test_search_places_mocked():

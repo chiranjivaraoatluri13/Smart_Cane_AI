@@ -52,6 +52,21 @@ def osrm_base_url(override: str | None = None) -> str:
     return OSRM_BASE
 
 
+def _osrm_base_candidates(osrm_base: str | None = None) -> list[str]:
+    """Ordered OSRM foot endpoints to try (explicit override, env, default)."""
+    seen: set[str] = set()
+    bases: list[str] = []
+    for raw in (osrm_base, os.environ.get("OSRM_BASE_URL", ""), _DEFAULT_OSRM):
+        if not raw or not str(raw).strip():
+            continue
+        base = str(raw).strip().rstrip("/")
+        if base in seen:
+            continue
+        seen.add(base)
+        bases.append(base)
+    return bases or [_DEFAULT_OSRM.rstrip("/")]
+
+
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     r = 6_371_000.0
     p1, p2 = math.radians(lat1), math.radians(lat2)
@@ -97,35 +112,41 @@ def fetch_route(
     max_attempts: int = 3,
 ) -> RoutePlan:
     """Fetch a foot route from OSRM."""
-    base = osrm_base_url(osrm_base)
-    url = (
-        f"{base}/{start_lon},{start_lat};{dest_lon},{dest_lat}"
-        "?overview=full&geometries=geojson&steps=false"
-    )
+    bases = _osrm_base_candidates(osrm_base)
     own_client = client is None
     if own_client:
-        client = httpx.Client(timeout=30.0)
+        client = httpx.Client(timeout=30.0, headers={"User-Agent": USER_AGENT})
 
     last_err: Exception | None = None
+    data: dict[str, Any] | None = None
     try:
-        for attempt in range(max(1, max_attempts)):
-            try:
-                resp = client.get(url)
-                resp.raise_for_status()
-                data = resp.json()
-                break
-            except (httpx.HTTPError, ValueError) as e:
-                last_err = e
+        for base in bases:
+            url = (
+                f"{base}/{start_lon},{start_lat};{dest_lon},{dest_lat}"
+                "?overview=full&geometries=geojson&steps=false"
+            )
+            for attempt in range(max(1, max_attempts)):
+                try:
+                    resp = client.get(url)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    if data.get("code") == "Ok" and data.get("routes"):
+                        break
+                    last_err = ValueError(
+                        f"OSRM route failed: {data.get('message', data)}"
+                    )
+                except (httpx.HTTPError, ValueError) as e:
+                    last_err = e
                 if attempt + 1 < max_attempts:
                     time.sleep(0.5 * (attempt + 1))
-        else:
+            if data is not None and data.get("code") == "Ok" and data.get("routes"):
+                break
+            data = None
+        if data is None or not data.get("routes"):
             raise last_err or RuntimeError("OSRM fetch failed")
     finally:
         if own_client:
             client.close()
-
-    if data.get("code") != "Ok" or not data.get("routes"):
-        raise ValueError(f"OSRM route failed: {data.get('message', data)}")
 
     route = data["routes"][0]
     coords = route["geometry"]["coordinates"]
@@ -527,6 +548,65 @@ def geocode_address(
     if not rows:
         raise ValueError(f"No geocode result for: {address!r}")
     return rows[0].lat, rows[0].lon
+
+
+def reverse_geocode(
+    lat: float,
+    lon: float,
+    *,
+    client: httpx.Client | None = None,
+) -> str:
+    """Return a short human-readable label for a map coordinate."""
+    own_client = client is None
+    if own_client:
+        client = httpx.Client(timeout=20.0, headers={"User-Agent": USER_AGENT})
+    try:
+        rows = _nominatim_get(
+            NOMINATIM_REVERSE,
+            {
+                "lat": lat,
+                "lon": lon,
+                "format": "json",
+                "zoom": 18,
+                "addressdetails": 1,
+            },
+            client=client,
+        )
+        if not rows:
+            return f"{lat:.5f}, {lon:.5f}"
+        row = rows[0]
+        address = row.get("address") or {}
+        if isinstance(address, dict):
+            parts: list[str] = []
+            for key in (
+                "amenity",
+                "shop",
+                "building",
+                "house_number",
+                "road",
+                "pedestrian",
+                "footway",
+                "suburb",
+                "neighbourhood",
+                "city",
+                "town",
+                "village",
+            ):
+                val = address.get(key)
+                if val and str(val) not in parts:
+                    parts.append(str(val))
+            if parts:
+                return ", ".join(parts[:3])
+        display = row.get("display_name")
+        if display:
+            text = str(display)
+            if len(text) > 72:
+                return ", ".join(text.split(",")[:2]).strip()
+            return text
+        return f"{lat:.5f}, {lon:.5f}"
+    finally:
+        if own_client:
+            client.close()
 
 
 def _segment_projection_fraction(

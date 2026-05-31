@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 
 from navigation.config import load_settings
-from navigation.maps.router import geocode_address, search_places
+from navigation.maps.router import geocode_address, reverse_geocode, search_places
 from navigation.models import Position
 from navigation.pipeline.runner import (
     _build_pipeline_components,
@@ -159,6 +159,29 @@ def search_places_endpoint():
         }), 502
 
 
+@app.route('/reverse_geocode', methods=['GET'])
+def reverse_geocode_endpoint():
+    """Resolve lat/lon to a short place label (map tap picker)."""
+    lat = _optional_float(request.args.get('lat'))
+    lon = _optional_float(request.args.get('lon'))
+    if lat is None or lon is None:
+        return jsonify({'ok': False, 'error': 'missing_coordinates'}), 400
+    try:
+        label = reverse_geocode(lat, lon)
+        return jsonify({
+            'ok': True,
+            'display_name': label,
+            'lat': lat,
+            'lon': lon,
+        }), 200
+    except Exception as e:  # pragma: no cover - network failure path
+        return jsonify({
+            'ok': False,
+            'error': 'reverse_unavailable',
+            'detail': str(e),
+        }), 502
+
+
 @app.route('/set_destination', methods=['POST'])
 def set_destination():
     """Geocode an address (or accept lat/lon) and arm map guidance."""
@@ -181,6 +204,7 @@ def set_destination():
     else:
         return jsonify({'ok': False, 'error': 'missing_address'}), 400
 
+    global settings
     with _pipeline_lock:
         interpreter.settings = interpreter.settings.model_copy(
             update={
@@ -189,6 +213,7 @@ def set_destination():
                 'use_map_guidance': True,
             }
         )
+        settings = interpreter.settings
         if hasattr(interpreter, 'reset_map_state'):
             interpreter.reset_map_state()
         else:
@@ -239,7 +264,7 @@ def process_frame_endpoint():
             record = run_process_frame(
                 frame,
                 frame_id=frame_id,
-                settings=settings,
+                settings=interpreter.settings,
                 segmenter=segmenter,
                 depth_est=None,          # skip depth — saves ~28ms
                 care=care,
@@ -269,6 +294,16 @@ def process_frame_endpoint():
             'processing_time_ms': int(process_time * 1000),
             'fps': round(fps, 1),
             'alerts': record.get('alerts', []),
+            'route_status': {
+                'destination_set': interpreter.settings.map_destination_set,
+                'loading': (
+                    interpreter.is_route_loading()
+                    if hasattr(interpreter, 'is_route_loading')
+                    else False
+                ),
+                'active': getattr(interpreter, '_map_guidance', None) is not None,
+                'failed': getattr(interpreter, '_route_permanent_failure', False),
+            },
         }
         if 'facts' in record:
             response['facts'] = record['facts']

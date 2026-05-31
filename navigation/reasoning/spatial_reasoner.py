@@ -198,6 +198,13 @@ class SpatialReasoner:
                 confidence = care_score  # High safety = high confidence in movement
             rationale = f"CARE direction {deg:.1f}° gated by per-side walkable (safety {care_score:.2f})"
 
+        # Confidence threshold enforcement: if confidence < 0.75, must STOP
+        # This ensures we only walk when we're confident (>= 0.75)
+        if confidence < 0.75 and command != NavigationCommand.STOP:
+            command = NavigationCommand.STOP
+            confidence = 1.0 - confidence  # Invert: low confidence = high confidence in STOP
+            rationale = f"Confidence {confidence:.2f} below 0.75 threshold — safety priority"
+        
         decision = NavigationDecision(
             command=command, confidence=confidence, rationale=rationale
         )

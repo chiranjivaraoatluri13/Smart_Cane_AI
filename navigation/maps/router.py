@@ -20,6 +20,8 @@ _DEFAULT_OSRM = "https://router.project-osrm.org/route/v1/foot"
 OSRM_BASE = os.environ.get("OSRM_BASE_URL", _DEFAULT_OSRM).rstrip("/")
 NOMINATIM_SEARCH = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_REVERSE = "https://nominatim.openstreetmap.org/reverse"
+PHOTON_SEARCH = "https://photon.komoot.io/api/"
+OVERPASS_INTERPRETER = "https://overpass-api.de/api/interpreter"
 USER_AGENT = "assistive-navigation/0.1 (MVP; local demo)"
 
 
@@ -166,6 +168,119 @@ def _normalize_search_query(query: str) -> str:
     return q.strip()
 
 
+def _overpass_name_pattern(query: str) -> str:
+    """Build a flexible regex for POI names: 'hungry birds' -> 'hungry.*birds'."""
+    words = [re.escape(w) for w in query.split() if w]
+    return ".*".join(words) if words else ""
+
+
+def _photon_display_name(props: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key in ("name", "street", "housenumber", "city", "state", "country"):
+        val = props.get(key)
+        if val and str(val) not in parts:
+            parts.append(str(val))
+    return ", ".join(parts) if parts else "Place"
+
+
+def _search_photon(
+    q: str,
+    *,
+    near_lat: float | None,
+    near_lon: float | None,
+    client: httpx.Client,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Komoot Photon — strong for restaurants/POIs (e.g. 'Hungry Birds')."""
+    params: dict[str, str | int | float] = {
+        "q": q,
+        "limit": limit,
+        "lang": "en",
+    }
+    if near_lat is not None and near_lon is not None:
+        params["lat"] = near_lat
+        params["lon"] = near_lon
+    resp = client.get(PHOTON_SEARCH, params=params, timeout=15.0)
+    resp.raise_for_status()
+    data = resp.json()
+    rows: list[dict[str, Any]] = []
+    for feat in data.get("features") or []:
+        if not isinstance(feat, dict):
+            continue
+        geom = feat.get("geometry") or {}
+        coords = geom.get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        props = feat.get("properties") or {}
+        rows.append(
+            {
+                "lat": float(coords[1]),
+                "lon": float(coords[0]),
+                "display_name": _photon_display_name(props),
+            }
+        )
+    return rows
+
+
+def _search_overpass_poi(
+    q: str,
+    *,
+    near_lat: float,
+    near_lon: float,
+    client: httpx.Client,
+    radius_km: float,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """OpenStreetMap Overpass — finds named POIs Nominatim may miss."""
+    pattern = _overpass_name_pattern(q)
+    if not pattern:
+        return []
+    radius_m = int(max(radius_km, 1.0) * 1000)
+    overpass_q = f"""
+[out:json][timeout:20];
+(
+  nwr["name"~"{pattern}",i](around:{radius_m},{near_lat},{near_lon});
+);
+out center {max(1, min(limit, 15))};
+""".strip()
+    resp = client.post(
+        OVERPASS_INTERPRETER,
+        data={"data": overpass_q},
+        headers={"User-Agent": USER_AGENT},
+        timeout=25.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    rows: list[dict[str, Any]] = []
+    for el in data.get("elements") or []:
+        if not isinstance(el, dict):
+            continue
+        tags = el.get("tags") or {}
+        name = tags.get("name")
+        if not name:
+            continue
+        lat = el.get("lat")
+        lon = el.get("lon")
+        center = el.get("center") or {}
+        if lat is None:
+            lat = center.get("lat")
+        if lon is None:
+            lon = center.get("lon")
+        if lat is None or lon is None:
+            continue
+        city = tags.get("addr:city") or tags.get("addr:town") or ""
+        state = tags.get("addr:state") or ""
+        label = str(name)
+        if city:
+            label += f", {city}"
+        if state:
+            label += f", {state}"
+        rows.append(
+            {"lat": float(lat), "lon": float(lon), "display_name": label}
+        )
+    return rows
+
+
 def _viewbox_around(
     lat: float, lon: float, radius_km: float
 ) -> tuple[float, float, float, float]:
@@ -298,14 +413,46 @@ def search_places(
     def _search(params: dict[str, str | int | float]) -> None:
         if len(merged) >= fetch_limit:
             return
-        base = {
+        base: dict[str, str | int | float] = {
             "format": "json",
             "limit": fetch_limit,
             "addressdetails": 0,
+            "dedupe": 1,
         }
         base.update(params)
         rows = _nominatim_get(NOMINATIM_SEARCH, base, client=client)
         _collect(rows)
+
+    def _search_photon_rows(extra_q: str | None = None) -> None:
+        if len(merged) >= fetch_limit:
+            return
+        try:
+            rows = _search_photon(
+                extra_q or q,
+                near_lat=near_lat,
+                near_lon=near_lon,
+                client=client,
+                limit=fetch_limit,
+            )
+            _collect(rows)
+        except Exception as e:
+            logger.debug("Photon search failed: %s", e)
+
+    def _search_overpass_rows() -> None:
+        if near_lat is None or near_lon is None or len(merged) >= fetch_limit:
+            return
+        try:
+            rows = _search_overpass_poi(
+                q,
+                near_lat=near_lat,
+                near_lon=near_lon,
+                client=client,
+                radius_km=radius_km,
+                limit=fetch_limit,
+            )
+            _collect(rows)
+        except Exception as e:
+            logger.debug("Overpass POI search failed: %s", e)
 
     try:
         if near_lat is not None and near_lon is not None:
@@ -321,14 +468,28 @@ def search_places(
             if len(merged) < limit:
                 _search({"q": q, "viewbox": viewbox, "bounded": 0})
 
-            # Append city/state from reverse geocode when query has no place name.
             locality = _reverse_locality(near_lat, near_lon, client=client)
-            if locality and locality.lower() not in q.lower() and len(merged) < limit:
-                _search({"q": f"{q} {locality}", "viewbox": viewbox, "bounded": 1})
+            if locality and locality.lower() not in q.lower():
+                if len(merged) < limit:
+                    _search({"q": f"{q} {locality}", "viewbox": viewbox, "bounded": 1})
+                if len(merged) < limit:
+                    _search({"q": f"{q} {locality}", "viewbox": viewbox, "bounded": 0})
+                if len(merged) < limit:
+                    _search({"q": f"{q} {locality}"})
+
+            # Photon + Overpass excel at local business names.
+            if len(merged) < limit:
+                _search_photon_rows()
+            if len(merged) < limit and locality:
+                _search_photon_rows(f"{q} {locality}")
+            if len(merged) < limit:
+                _search_overpass_rows()
 
         # Global fallback (or primary when no GPS).
         if len(merged) < limit:
             _search({"q": q})
+        if len(merged) < limit:
+            _search_photon_rows()
     finally:
         if own_client:
             client.close()
@@ -347,65 +508,25 @@ def geocode_address(
     near_lon: float | None = None,
     client: httpx.Client | None = None,
 ) -> tuple[float, float]:
-    """Resolve an address to (lat, lon) via Nominatim."""
-    q = _normalize_search_query(address)
-    headers = {"User-Agent": USER_AGENT}
+    """Resolve an address to (lat, lon) via Nominatim/Photon/Overpass."""
     own_client = client is None
+    headers = {"User-Agent": USER_AGENT}
     if own_client:
         client = httpx.Client(timeout=20.0, headers=headers)
     try:
-        rows: list[dict[str, Any]] = []
-        if near_lat is not None and near_lon is not None:
-            min_lon, max_lat, max_lon, min_lat = _viewbox_around(
-                near_lat, near_lon, 25.0
-            )
-            viewbox = f"{min_lon},{max_lat},{max_lon},{min_lat}"
-            rows = _nominatim_get(
-                NOMINATIM_SEARCH,
-                {
-                    "q": q,
-                    "format": "json",
-                    "limit": 5,
-                    "viewbox": viewbox,
-                    "bounded": 1,
-                },
-                client=client,
-            )
-            if not rows:
-                locality = _reverse_locality(near_lat, near_lon, client=client)
-                if locality and locality.lower() not in q.lower():
-                    rows = _nominatim_get(
-                        NOMINATIM_SEARCH,
-                        {
-                            "q": f"{q} {locality}",
-                            "format": "json",
-                            "limit": 5,
-                            "viewbox": viewbox,
-                            "bounded": 1,
-                        },
-                        client=client,
-                    )
-        if not rows:
-            rows = _nominatim_get(
-                NOMINATIM_SEARCH,
-                {"q": q, "format": "json", "limit": 1},
-                client=client,
-            )
+        rows = search_places(
+            address,
+            limit=1,
+            near_lat=near_lat,
+            near_lon=near_lon,
+            client=client,
+        )
     finally:
         if own_client:
             client.close()
     if not rows:
         raise ValueError(f"No geocode result for: {address!r}")
-    if near_lat is not None and near_lon is not None and len(rows) > 1:
-        rows.sort(
-            key=lambda r: distance_meters(
-                near_lat,
-                near_lon,
-                float(r["lat"]),
-                float(r["lon"]),
-            )
-        )
-    return float(rows[0]["lat"]), float(rows[0]["lon"])
+    return rows[0].lat, rows[0].lon
 
 
 def _segment_projection_fraction(

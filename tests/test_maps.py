@@ -194,6 +194,46 @@ def test_search_places_nearby_uses_viewbox():
     assert any("viewbox=" in c for c in calls)
 
 
+def test_search_places_uses_photon_for_poi():
+    from navigation.maps.router import search_places
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "photon.komoot.io" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "features": [
+                        {
+                            "geometry": {"coordinates": [-111.94, 33.42]},
+                            "properties": {
+                                "name": "Hungry Birds",
+                                "city": "Tempe",
+                                "state": "Arizona",
+                            },
+                        }
+                    ]
+                },
+            )
+        if "/reverse" in url:
+            return httpx.Response(
+                200,
+                json={"address": {"city": "Tempe", "state": "Arizona"}},
+            )
+        return httpx.Response(200, json=[])
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport, headers={"User-Agent": "test"}) as client:
+        rows = search_places(
+            "hungry birds",
+            near_lat=33.42,
+            near_lon=-111.94,
+            client=client,
+        )
+    assert len(rows) >= 1
+    assert any("Hungry" in r.display_name for r in rows)
+
+
 def test_next_route_cue_off_route(sample_route):
     """Far from polyline → rejoin cue with cross-track distance."""
     from navigation.reasoning.spatial_reasoner import _next_route_cue

@@ -136,6 +136,19 @@
             pointer-events: none;
         }
 
+        #gps-status {
+            margin-top: 4px;
+            padding: 0 12px;
+            font-size: 12px;
+            color: #fbbf24;
+            text-align: center;
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        #gps-status.ready { color: #86efac; }
+        #gps-status.error { color: #fca5a5; }
+
         .suggestion-distance {
             flex-shrink: 0;
             margin-left: 8px;
@@ -331,6 +344,7 @@
                 >
             </div>
             <div id="suggestions" role="listbox" aria-label="Place suggestions"></div>
+            <div id="gps-status">📍 Getting your location…</div>
             <div id="search-status" class="suggestion-status"></div>
             <div id="dest-confirm"></div>
         </div>
@@ -414,6 +428,8 @@
         let lastPosition = { lat: null, lon: null, accuracy: null };
         let lastHeading  = null;
         let prevGeoPoint = null;   // for GPS-derived heading when compass absent
+        let _geoWatchId  = null;
+        let _locationPromise = null;
 
         function bearingDeg(lat1, lon1, lat2, lon2) {
             const toRad = d => d * Math.PI / 180;
@@ -458,6 +474,7 @@
         const searchInput    = document.getElementById('search-input');
         const suggestionsEl  = document.getElementById('suggestions');
         const searchStatusEl = document.getElementById('search-status');
+        const gpsStatusEl    = document.getElementById('gps-status');
         const destConfirm    = document.getElementById('dest-confirm');
 
         let _suggestTimer = null;
@@ -476,15 +493,97 @@
             return (meters / 1609.34).toFixed(1) + ' mi';
         }
 
+        function updateGpsStatus(ok, detail) {
+            if (!gpsStatusEl) return;
+            gpsStatusEl.classList.remove('ready', 'error');
+            if (ok && lastPosition.lat != null) {
+                gpsStatusEl.classList.add('ready');
+                const acc = lastPosition.accuracy != null
+                    ? ` ±${Math.round(lastPosition.accuracy)}m`
+                    : '';
+                gpsStatusEl.textContent =
+                    `📍 Location ready${acc} — nearby search enabled`;
+            } else if (detail) {
+                gpsStatusEl.classList.add('error');
+                gpsStatusEl.textContent = '📍 Location needed — tap here to allow';
+            } else {
+                gpsStatusEl.textContent = '📍 Getting your location…';
+            }
+        }
+
+        function applyGeoPosition(pos) {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            if (prevGeoPoint && (lat !== prevGeoPoint.lat || lon !== prevGeoPoint.lon)) {
+                const moved = bearingDeg(prevGeoPoint.lat, prevGeoPoint.lon, lat, lon);
+                if (pos.coords.speed == null || pos.coords.speed > 0.3) {
+                    lastHeading = moved;
+                }
+            }
+            prevGeoPoint = { lat, lon };
+            const hadGps = lastPosition.lat != null;
+            lastPosition.lat      = lat;
+            lastPosition.lon      = lon;
+            lastPosition.accuracy = pos.coords.accuracy;
+            if (pos.coords.heading != null && !Number.isNaN(pos.coords.heading)) {
+                lastHeading = pos.coords.heading;
+            }
+            updateGpsStatus(true);
+            if (!hadGps) {
+                const q = searchInput.value.trim();
+                if (q.length >= 2) {
+                    fetchSuggestions(q);
+                }
+            }
+        }
+
+        function ensureUserLocation() {
+            if (lastPosition.lat != null && lastPosition.lon != null) {
+                updateGpsStatus(true);
+                return Promise.resolve(true);
+            }
+            if (!('geolocation' in navigator)) {
+                updateGpsStatus(false, 'unsupported');
+                return Promise.resolve(false);
+            }
+            if (_locationPromise) return _locationPromise;
+
+            updateGpsStatus(false);
+            setSearchStatus('Waiting for GPS… allow location if prompted');
+
+            _locationPromise = new Promise((resolve) => {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        applyGeoPosition(pos);
+                        _locationPromise = null;
+                        resolve(true);
+                    },
+                    (err) => {
+                        dbg('getCurrentPosition:', err.message);
+                        updateGpsStatus(false, err.message);
+                        _locationPromise = null;
+                        resolve(false);
+                    },
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+                );
+            });
+            return _locationPromise;
+        }
+
         async function fetchSuggestions(query) {
             if (query.length < 2) {
                 hideSuggestions();
                 setSearchStatus('');
                 return;
             }
+            await ensureUserLocation();
             const seq = ++_suggestSeq;
             const hasGps = lastPosition.lat != null && lastPosition.lon != null;
-            setSearchStatus(hasGps ? 'Searching nearby…' : 'Searching… (allow GPS for nearby results)');
+            if (!hasGps) {
+                setSearchStatus('Allow location above, then search again for nearby places');
+            } else {
+                setSearchStatus('Searching nearby…');
+            }
             try {
                 let url = `${SERVER_URL}/search_places?q=${encodeURIComponent(query)}`;
                 if (hasGps) {
@@ -590,6 +689,8 @@
                 return;
             }
 
+            await ensureUserLocation();
+
             hideSuggestions();
 
             destConfirm.style.display = 'block';
@@ -636,42 +737,23 @@
         function startGeolocation() {
             if (!('geolocation' in navigator)) {
                 console.log('Geolocation not supported');
+                updateGpsStatus(false, 'unsupported');
                 return;
             }
-            navigator.geolocation.watchPosition(
-                (pos) => {
-                    const lat = pos.coords.latitude;
-                    const lon = pos.coords.longitude;
-                    if (prevGeoPoint && (lat !== prevGeoPoint.lat || lon !== prevGeoPoint.lon)) {
-                        const moved = bearingDeg(prevGeoPoint.lat, prevGeoPoint.lon, lat, lon);
-                        if (pos.coords.speed == null || pos.coords.speed > 0.3) {
-                            lastHeading = moved;
-                        }
-                    }
-                    prevGeoPoint = { lat, lon };
-                    const hadGps = lastPosition.lat != null;
-                    lastPosition.lat      = lat;
-                    lastPosition.lon      = lon;
-                    lastPosition.accuracy = pos.coords.accuracy;
-                    if (pos.coords.heading != null && !Number.isNaN(pos.coords.heading)) {
-                        lastHeading = pos.coords.heading;
-                    }
-                    // Re-run search with GPS bias when location first arrives.
-                    if (!hadGps) {
-                        const q = searchInput.value.trim();
-                        if (q.length >= 2 && document.activeElement === searchInput) {
-                            fetchSuggestions(q);
-                        }
-                    }
-                },
+            if (_geoWatchId != null) return;
+            _geoWatchId = navigator.geolocation.watchPosition(
+                (pos) => applyGeoPosition(pos),
                 (err) => {
                     console.log('Geolocation error:', err.message);
+                    updateGpsStatus(false, err.message);
                     if (isRunning) {
                         detailsDiv.textContent = '⚠ GPS error: ' + err.message;
                     }
                 },
                 { enableHighAccuracy: true, maximumAge: 500, timeout: 10000 }
             );
+            // Prompt for location immediately (may need user gesture on iOS).
+            ensureUserLocation();
         }
 
         function startCompass() {
@@ -760,6 +842,7 @@
                 return;
             }
             dbg('server reachable');
+            await ensureUserLocation();
 
             // Check if video is ready
             if (!video.videoWidth || !video.videoHeight) {
@@ -982,6 +1065,17 @@
             await checkConnection();
             startGeolocation();
             startCompass();
+
+            // Search input: request GPS on focus (iOS needs user gesture)
+            searchInput.addEventListener('focus', () => {
+                ensureUserLocation();
+            });
+
+            if (gpsStatusEl) {
+                gpsStatusEl.addEventListener('click', () => {
+                    ensureUserLocation();
+                });
+            }
 
             // Search input: debounced suggestions on typing
             searchInput.addEventListener('input', () => {

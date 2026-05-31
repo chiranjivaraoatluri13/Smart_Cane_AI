@@ -8,6 +8,8 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: PROCESS_EVERY_N_FRAMES
+        value: "10"
       - key: SEGMENTER_BACKEND
         value: segformer_onnx
       - key: SEGFORMER_MODEL_ID

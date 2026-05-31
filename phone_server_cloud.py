@@ -77,7 +77,8 @@ settings = load_settings()
 
 # ADE20K SegFormer segmenter (indoor + outdoor, no closed-set hallucination).
 segmenter = build_segmenter(settings)
-depth_est = UniDepthEstimator(settings)
+# Skip depth estimation on cloud - use default "mid" distance
+# This saves 28ms per frame
 care = CareNavigator(settings)
 interpreter = NavigationInterpreter(settings)
 validator = CommandValidator(settings)
@@ -183,7 +184,7 @@ def process_frame_endpoint():
                 frame_id=frame_id,
                 settings=settings,
                 segmenter=segmenter,
-                depth_est=depth_est,
+                depth_est=None,  # Skip depth estimation (saves 28ms)
                 care=care,
                 interpreter=interpreter,
                 validator=validator,

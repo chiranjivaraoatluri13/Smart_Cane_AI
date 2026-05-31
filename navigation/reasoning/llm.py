@@ -105,7 +105,7 @@ class NavigationInterpreter:
         if bundle.care.hazard_detected:
             return NavigationDecision(
                 command=NavigationCommand.STOP,
-                confidence=0.85,
+                confidence=0.65,  # Low confidence = hazard detected, must stop
                 rationale="Obstacle or hazard within critical range",
             )
         return None
@@ -158,7 +158,7 @@ class NavigationInterpreter:
         if care.safety_score < 0.5:
             return NavigationDecision(
                 command=NavigationCommand.SLOW_DOWN,
-                confidence=0.75,
+                confidence=0.60,  # Low confidence — safety score is low
                 rationale="Reduced safety score",
             )
         deg = care.safe_direction_deg or 0.0

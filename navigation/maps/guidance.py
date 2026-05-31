@@ -61,7 +61,7 @@ class MapGuidance:
         if abs(delta) <= align_deg:
             return NavigationDecision(
                 command=NavigationCommand.GO_FORWARD,
-                confidence=0.85,
+                confidence=0.90,  # High confidence — on route and aligned
                 rationale=(
                     f"On route, bearing {target_bearing:.0f}° "
                     f"({dest_dist:.0f} m to destination)"
@@ -75,7 +75,7 @@ class MapGuidance:
             turn = "right"
         return NavigationDecision(
             command=cmd,
-            confidence=0.75,
+            confidence=0.80,  # High confidence — clear turn direction
             rationale=(
                 f"Turn {turn} toward path "
                 f"(target {target_bearing:.0f}°, you face {heading_deg:.0f}°)"

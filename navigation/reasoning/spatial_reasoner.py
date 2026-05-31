@@ -141,13 +141,15 @@ class SpatialReasoner:
         bucket, distance_phrase = bucketize(depth.obstacle_depth_m, self._distance_cfg)
 
         # (e) Command selection — strict ordering, vision_stop dominates.
+        # NOTE: Confidence threshold is 0.75. Commands with confidence >= 0.75 are safe to execute.
+        # Commands with confidence < 0.75 should result in STOP (safety priority).
         if vision_stop:
             command = NavigationCommand.STOP
-            confidence = 0.85
+            confidence = 0.65  # Low confidence = hazard detected, must stop
             rationale = "vision_stop: hazard or center-side obstacle ratio exceeded"
         elif route_cue is not None and route_cue.turn == "stop":
             command = NavigationCommand.STOP
-            confidence = 0.9
+            confidence = 0.95  # At destination — very confident in STOP
             rationale = f"At destination ({route_cue.meters_to_turn:.0f} m)"
         elif route_cue is not None and route_cue.turn in ("left", "right"):
             target_side: Side = "left" if route_cue.turn == "left" else "right"
@@ -159,11 +161,11 @@ class SpatialReasoner:
                     if target_side == "left"
                     else NavigationCommand.MOVE_RIGHT
                 )
-                confidence = 0.8
+                confidence = 0.85  # High confidence in turn direction
                 rationale = f"map cue: turn {target_side}, target side walkable"
             else:
                 command = NavigationCommand.SLOW_DOWN
-                confidence = 0.65
+                confidence = 0.70  # Moderate confidence — path unclear
                 rationale = (
                     f"map says turn {target_side} but {target_side} "
                     f"walkable {target_walkable:.2f} < center {center_walkable:.2f}"
@@ -171,7 +173,7 @@ class SpatialReasoner:
         elif self._all_lanes_blocked(walkable_by_side):
             # Req 2.5 — every side below min_lane_walkable_ratio.
             command = NavigationCommand.SLOW_DOWN
-            confidence = 0.7
+            confidence = 0.60  # Low confidence — all lanes blocked
             rationale = "no walkable lane on any side"
         else:
             # CARE-direction fallback gated by per-side walkable.
@@ -186,8 +188,15 @@ class SpatialReasoner:
                 command = NavigationCommand.MOVE_RIGHT
             else:
                 command = NavigationCommand.GO_FORWARD
-            confidence = float(care.safety_score)
-            rationale = f"CARE direction {deg:.1f}° gated by per-side walkable"
+            # Use CARE safety score directly, but ensure it's >= 0.75 for walking
+            care_score = float(care.safety_score)
+            if care_score < 0.75:
+                # Low safety score — convert to STOP
+                command = NavigationCommand.STOP
+                confidence = 1.0 - care_score  # Invert: low safety = high confidence in STOP
+            else:
+                confidence = care_score  # High safety = high confidence in movement
+            rationale = f"CARE direction {deg:.1f}° gated by per-side walkable (safety {care_score:.2f})"
 
         decision = NavigationDecision(
             command=command, confidence=confidence, rationale=rationale

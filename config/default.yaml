@@ -37,7 +37,8 @@ ade20k_segmentation:
     - chair
     - table
     - sofa
-    - plant
+    # plant omitted — roadside vegetation is not a path blocker; counting it
+    # as a full obstacle caused false STOP on clear sidewalks (physical runs).
     - column
     - pole
     - railing
@@ -101,6 +102,8 @@ voice:
 # Spatial perception + stairs heuristic (Requirements 2, 5, 14).
 spatial:
   min_lane_walkable_ratio: 0.10
+  # Center lane must be this walkable before vision_stop can fire (clear path).
+  min_center_walkable_for_forward: 0.18
   stairs_detector_enabled: true
   stairs_min_edge_density: 0.08
   stairs_min_confidence: 0.4

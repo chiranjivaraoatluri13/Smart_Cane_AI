@@ -74,12 +74,15 @@ _ROUTE_CUE_CHOICES = st.one_of(
 def test_vision_stop_overrides_all(
     hazard, route_cue, walk_left, walk_center, walk_right, safety_score, safe_dir
 ):
-    """When CARE flags hazard, decision is STOP; route_cue may remain for HUD."""
+    """When CARE flags hazard with a blocked center lane, decision is STOP."""
     if not hazard:
         return  # only assert on the hazard branch
+    # Blocked path — high walkable on sides must not suppress a real hazard.
+    walk_center = min(walk_center, 0.05)
     reasoner = SpatialReasoner(_settings())
     seg = _seg(
         per_side_walkable_ratio={"left": walk_left, "center": walk_center, "right": walk_right},
+        walkable_ratio=walk_center,
     )
     care = CareResult(
         hazard_detected=True, safety_score=safety_score, safe_direction_deg=safe_dir
@@ -211,7 +214,8 @@ def test_map_and_vision_blend_when_clear():
 def test_vision_stop_drops_route():
     reasoner = SpatialReasoner(_settings())
     seg = _seg(
-        per_side_walkable_ratio={"left": 0.5, "center": 0.5, "right": 0.5},
+        per_side_walkable_ratio={"left": 0.05, "center": 0.05, "right": 0.05},
+        walkable_ratio=0.05,
     )
     care = CareResult(hazard_detected=True, safety_score=0.2, safe_direction_deg=0.0)
     cue = RouteCue(turn="left", meters_to_turn=10.0, target_bearing_deg=270.0)
@@ -242,6 +246,62 @@ def test_route_cue_stop_at_destination():
     assert decision.command == NavigationCommand.STOP
     assert facts.vision_stop is False  # destination, not hazard
     assert facts.route_cue is not None  # destination cue stays
+
+
+def test_clear_path_go_forward():
+    """Open center lane with no hazard → go_forward, not stop."""
+    reasoner = SpatialReasoner(_settings(hazard_obstacle_ratio=0.08))
+    seg = _seg(
+        per_side_walkable_ratio={"left": 0.25, "center": 0.55, "right": 0.30},
+        per_side_class_pixels={
+            "left": {},
+            "center": {"floor": 500.0},
+            "right": {},
+        },
+        walkable_ratio=0.55,
+        shape=(48, 64),
+    )
+    care = CareResult(hazard_detected=False, safety_score=0.9, safe_direction_deg=0.0)
+    decision, facts = reasoner.decide(seg, DepthResult(), care, None, stairs=_no_stairs())
+    assert decision.command == NavigationCommand.GO_FORWARD
+    assert facts.vision_stop is False
+
+
+def test_plant_on_side_does_not_stop():
+    """Vegetation on the left should not trigger vision_stop when center is clear."""
+    reasoner = SpatialReasoner(_settings(hazard_obstacle_ratio=0.05))
+    seg = _seg(
+        per_side_walkable_ratio={"left": 0.15, "center": 0.60, "right": 0.55},
+        per_side_class_pixels={
+            "left": {"plant": 800.0},
+            "center": {"sidewalk": 600.0},
+            "right": {},
+        },
+        walkable_ratio=0.50,
+        shape=(48, 64),
+    )
+    care = CareResult(hazard_detected=False, safety_score=0.9, safe_direction_deg=0.0)
+    decision, facts = reasoner.decide(seg, DepthResult(), care, None, stairs=_no_stairs())
+    assert decision.command == NavigationCommand.GO_FORWARD
+    assert facts.vision_stop is False
+
+
+def test_vision_stop_suppressed_when_center_walkable():
+    """High center walkable releases vision_stop even if side obstacles are heavy."""
+    reasoner = SpatialReasoner(_settings(hazard_obstacle_ratio=0.02))
+    seg = _seg(
+        per_side_walkable_ratio={"left": 0.05, "center": 0.65, "right": 0.05},
+        per_side_class_pixels={
+            "left": {"car": 2000.0},
+            "center": {"sidewalk": 400.0},
+            "right": {"car": 2000.0},
+        },
+        walkable_ratio=0.40,
+        shape=(48, 64),
+    )
+    care = CareResult(hazard_detected=False, safety_score=0.9, safe_direction_deg=0.0)
+    _, facts = reasoner.decide(seg, DepthResult(), care, None, stairs=_no_stairs())
+    assert facts.vision_stop is False
 
 
 def test_facts_carries_distance_bucket_and_phrase():

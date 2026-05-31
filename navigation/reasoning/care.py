@@ -10,6 +10,11 @@ import numpy as np
 
 from navigation.config import Settings
 from navigation.models import CareResult, DepthResult, SegmentationResult
+from navigation.reasoning.mask_metrics import (
+    center_band_pixel_area,
+    center_obstacle_weighted,
+    walkable_by_side,
+)
 
 
 class CareNavigator:
@@ -31,38 +36,37 @@ class CareNavigator:
     def _heuristic(
         self, segmentation: SegmentationResult, depth: DepthResult
     ) -> CareResult:
-        shape = segmentation.metadata.get("shape", [480, 640])
-        if isinstance(shape, (list, tuple)) and len(shape) >= 2:
-            frame_area = int(shape[0]) * int(shape[1])
-        else:
-            frame_area = 640 * 480
+        cfg = self.settings.seg_class_config()
+        obstacle_set = set(cfg.get("obstacle_classes", []))
+        min_center_walk = float(
+            getattr(self.settings, "min_center_walkable_for_forward", 0.18)
+        )
+        walkable = walkable_by_side(segmentation)
+        center_walk = walkable.get("center", 0.0)
+        path_clear = (
+            center_walk >= min_center_walk
+            or float(segmentation.walkable_ratio) >= min_center_walk
+        )
 
-        # Region-weighted count is preferred: a person 1m dead-center weighs
-        # full, a building filling the upper periphery weighs ~0. Falls back
-        # to the raw obstacle count when no weighted count is available.
-        weighted = segmentation.obstacle_pixels_weighted
-        obstacle_score = weighted if weighted > 0 else float(segmentation.obstacle_pixels)
-
-        # Effective area: weighted counts live in [0, ~half the frame] because
-        # weights average <1, so we compare them against the same area * ratio.
-        # We use a slightly tighter ratio for weighted counts so a small object
-        # in the path still trips, while a class that only fills the periphery
-        # does not.
+        # Center-lane obstacles only — plants/cars on the sides must not STOP.
+        weighted = center_obstacle_weighted(segmentation, obstacle_set)
+        if weighted <= 0:
+            weighted = float(segmentation.obstacle_pixels_weighted)
+        center_area = center_band_pixel_area(segmentation)
         ratio = self.settings.hazard_obstacle_ratio
-        if weighted > 0:
-            # For weighted obstacles, use a higher threshold (2x) to reduce false positives
-            # on plain footpaths where the model might detect minor artifacts
-            min_obstacle = frame_area * ratio * 1.0  # Changed from 0.5 to 1.0
-        else:
-            min_obstacle = frame_area * ratio
-        hazard = obstacle_score >= max(min_obstacle, 1.0)
+        min_obstacle = center_area * ratio
+        hazard = (not path_clear) and weighted >= max(min_obstacle, 1.0)
 
         score = 0.9 if not hazard else 0.4
         direction = 0.0
-        if depth.obstacle_depth_m is not None and depth.obstacle_depth_m < 1.2:
+        if (
+            depth.obstacle_depth_m is not None
+            and depth.obstacle_depth_m < 1.2
+            and not path_clear
+        ):
             hazard = True
             score = 0.2
-            direction = -15.0 if segmentation.walkable_ratio > 0.5 else 15.0
+            direction = -15.0 if center_walk >= walkable.get("left", 0.0) else 15.0
         return CareResult(
             safe_direction_deg=direction,
             safety_score=score,
@@ -71,6 +75,8 @@ class CareNavigator:
                 "mode": "heuristic",
                 "obstacle_pixels": int(segmentation.obstacle_pixels),
                 "obstacle_weighted": float(weighted),
+                "center_walkable": float(center_walk),
+                "path_clear": path_clear,
                 "min_obstacle_threshold": float(min_obstacle),
             },
         )

@@ -37,6 +37,10 @@ from navigation.reasoning.facts import (
     RouteCue,
     StairsResult,
 )
+from navigation.reasoning.mask_metrics import (
+    center_obstacle_ratio,
+    walkable_by_side as _walkable_by_side_from_seg,
+)
 
 
 def _next_route_cue(
@@ -124,6 +128,9 @@ class SpatialReasoner:
             yaml_cfg = {}
         self._distance_cfg: DistanceConfig = load_distance_config(yaml_cfg)
         self._min_lane_walkable = float(settings.min_lane_walkable_ratio)
+        self._min_center_walkable = float(
+            getattr(settings, "min_center_walkable_for_forward", 0.18)
+        )
         # Hysteresis state to stop oscillating around the hazard threshold.
         # Once vision_stop fires, it stays sticky for ``stop_hold_frames``
         # subsequent frames so we don't flip STOP/SLOW_DOWN/STOP/SLOW_DOWN
@@ -158,10 +165,7 @@ class SpatialReasoner:
         hazards_by_side = self._hazards_by_side(seg, approach_by_category)
 
         # (c) Per-side walkable ratios — fall back to global if missing.
-        walkable_by_side: dict[Side, float] = (
-            seg.per_side_walkable_ratio
-            or {"left": float(seg.walkable_ratio), "center": float(seg.walkable_ratio), "right": float(seg.walkable_ratio)}
-        )
+        walkable_by_side: dict[Side, float] = _walkable_by_side_from_seg(seg)
 
         # (d) Distance bucket from the depth proxy.
         bucket, distance_phrase = bucketize(depth.obstacle_depth_m, self._distance_cfg)
@@ -235,14 +239,8 @@ class SpatialReasoner:
                 command = NavigationCommand.MOVE_RIGHT
             else:
                 command = NavigationCommand.GO_FORWARD
-            # Use CARE safety score directly, but ensure it's >= 0.75 for walking
             care_score = float(care.safety_score)
-            if care_score < 0.75:
-                # Low safety score — convert to STOP
-                command = NavigationCommand.STOP
-                confidence = 1.0 - care_score  # Invert: low safety = high confidence in STOP
-            else:
-                confidence = care_score  # High safety = high confidence in movement
+            confidence = max(care_score, 0.75)
             rationale = f"CARE direction {deg:.1f}° gated by per-side walkable (safety {care_score:.2f})"
 
         # Map-aligned movement should not be downgraded to STOP by the generic
@@ -250,10 +248,17 @@ class SpatialReasoner:
         map_active = route_cue is not None and route_cue.turn in (
             "forward", "left", "right", "loading"
         )
-        if confidence < 0.75 and command != NavigationCommand.STOP and not map_active:
+        if (
+            confidence < 0.75
+            and command != NavigationCommand.STOP
+            and not map_active
+            and (vision_stop or care.hazard_detected)
+        ):
             command = NavigationCommand.STOP
             confidence = 1.0 - confidence
-            rationale = f"Confidence {confidence:.2f} below 0.75 threshold — safety priority"
+            rationale = (
+                "Hazard detected with confidence below 0.75 — safety priority"
+            )
         
         decision = NavigationDecision(
             command=command, confidence=confidence, rationale=rationale
@@ -280,43 +285,40 @@ class SpatialReasoner:
     # ------------------------------------------------------------------
 
     def _vision_stop(self, seg: SegmentationResult, care: CareResult) -> bool:
-        if care.hazard_detected:
+        walkable = _walkable_by_side_from_seg(seg)
+        center_walk = walkable.get("center", 0.0)
+        path_clear = (
+            center_walk >= self._min_center_walkable
+            or float(seg.walkable_ratio) >= self._min_center_walkable
+        )
+
+        if care.hazard_detected and not path_clear:
             self._stop_hold_remaining = self._stop_hold_frames
             return True
-        # Center-side obstacle ratio gate (Req 3.4): if obstacles dominate
-        # the center third's walkable area, STOP regardless of CARE.
-        per_side = seg.per_side_class_pixels or {}
-        center = per_side.get("center", {}) if isinstance(per_side, dict) else {}
-        ratio: float = 0.0
-        if center:
-            obstacle_set = self._obstacle_class_set()
-            center_obstacle_weighted = sum(
-                float(w) for cls, w in center.items() if cls in obstacle_set
-            )
-            shape = (seg.metadata or {}).get("shape", [480, 640])
-            if not isinstance(shape, (list, tuple)) or len(shape) < 2:
-                shape = [480, 640]
-            frame_area = max(int(shape[0]) * int(shape[1]), 1)
-            center_area = max(frame_area / 3.0, 1.0)
-            ratio = center_obstacle_weighted / center_area
+
+        obstacle_set = self._obstacle_class_set()
+        ratio = center_obstacle_ratio(seg, obstacle_set)
 
         rising_threshold = self.settings.hazard_obstacle_ratio
         falling_threshold = rising_threshold * self._hazard_release_factor
 
-        # Sticky-stop hysteresis: once we go into STOP, stay there until the
-        # ratio drops well below the threshold *and* the hold timer expires.
-        # This kills STOP/SLOW_DOWN/STOP oscillation around the boundary.
+        # Clear center lane — release sticky STOP early and never start one.
+        if path_clear:
+            if self._stop_hold_remaining > 0:
+                self._stop_hold_remaining = 0
+            return False
+
+        # Sticky-stop hysteresis around the center obstacle ratio.
         if self._stop_hold_remaining > 0:
             self._stop_hold_remaining -= 1
             if ratio >= falling_threshold:
-                # Re-arm the hold so a still-noisy scene doesn't drop out
-                # right after the timer ends.
                 self._stop_hold_remaining = max(
                     self._stop_hold_remaining, self._stop_hold_frames // 2
                 )
                 return True
-            # Ratio is well below the falling threshold — still hold for
-            # the rest of the timer to give the user a beat to react.
+            if path_clear:
+                self._stop_hold_remaining = 0
+                return False
             return True
 
         if ratio >= rising_threshold:

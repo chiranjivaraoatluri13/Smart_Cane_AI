@@ -146,13 +146,19 @@ def test_care_weighted_path_does_not_trigger_for_periphery_only():
 
 
 def test_care_weighted_path_triggers_for_in_path_obstacle():
-    """When weighted count clears the threshold, hazard must be True."""
+    """When center-lane weighted count clears the threshold, hazard must be True."""
     settings = _silent_settings(hazard_obstacle_ratio=0.05)
     care = CareNavigator(settings)
     seg = SegmentationResult(
         obstacle_pixels=5000,
         obstacle_pixels_weighted=4000.0,
-        walkable_ratio=0.2,
+        walkable_ratio=0.12,
+        per_side_walkable_ratio={"left": 0.1, "center": 0.08, "right": 0.1},
+        per_side_class_pixels={
+            "left": {},
+            "center": {"person": 4000.0},
+            "right": {},
+        },
         metadata={"shape": [240, 320], "semantic": True},
     )
     depth = DepthResult(obstacle_depth_m=5.0)

@@ -43,7 +43,6 @@ settings = load_settings()
     composer,
     voice_queue,
     trend_tracker,
-    stairs_detector,
 ) = _build_pipeline_components(settings)
 print("Models loaded! Server ready.")
 
@@ -164,7 +163,7 @@ def process_frame_endpoint():
                 frame_id=frame_id,
                 settings=settings,
                 segmenter=segmenter,
-                depth_est=depth_est,
+                depth_est=None,          # skip depth — saves ~28ms
                 care=care,
                 interpreter=interpreter,
                 validator=validator,
@@ -174,7 +173,6 @@ def process_frame_endpoint():
                 composer=composer,
                 voice_queue=voice_queue,
                 trend_tracker=trend_tracker,
-                stairs_detector=stairs_detector,
                 position=position,
                 client_depth_m=client_depth_m,
             )

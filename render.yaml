@@ -17,7 +17,7 @@ services:
       - key: SEGFORMER_ONNX_PATH
         value: segformer_b0_ade20k_int8.onnx
       - key: INFERENCE_IMGSZ
-        value: "0"
+        value: "256"
       - key: TTS_ENABLED
         value: "false"
       - key: USE_LLM

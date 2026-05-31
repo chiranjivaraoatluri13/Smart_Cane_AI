@@ -42,3 +42,5 @@ services:
         value: "2"
       - key: USE_MAP_GUIDANCE
         value: "true"
+      - key: BUILD_TIMESTAMP
+        value: "2026-05-31-rebuild"

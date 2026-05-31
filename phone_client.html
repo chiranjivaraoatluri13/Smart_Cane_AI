@@ -531,7 +531,7 @@
             }
         }
 
-        dbg('client v5 loaded — secure context:', window.isSecureContext,
+        dbg('client v7 loaded — secure context:', window.isSecureContext,
             'mediaDevices:', !!navigator.mediaDevices);
 
         // ============================================================
@@ -541,7 +541,13 @@
         // Match server INFERENCE_IMGSZ=192 — smaller JPEG = faster upload + decode.
         const CAPTURE_W = 256;
         const CAPTURE_H = 192;
-        const JPEG_QUALITY = 0.65;
+        const JPEG_QUALITY = 0.50;
+        // On-device depth competes for CPU/bandwidth with uploads on cloud deploys.
+        // Enable only for same-WiFi laptop server experiments.
+        const ENABLE_ON_DEVICE_DEPTH =
+            new URLSearchParams(window.location.search).get('depth') === '1';
+        // One in-flight upload avoids piling up stale frames when inference > RTT.
+        const MAX_UPLOADS_IN_FLIGHT = 1;
 
         // ============================================================
         // Global state
@@ -557,6 +563,8 @@
         let isRunning   = false;
         let synth       = window.speechSynthesis;
         let frameCount  = 0;
+        let uploadsInFlight = 0;
+        let lastPhrase    = 'Ready';
         let lastPosition = { lat: null, lon: null, accuracy: null };
         let lastHeading  = null;
         let prevGeoPoint = null;   // for GPS-derived heading when compass absent
@@ -1145,6 +1153,10 @@
 
             isRunning  = true;
             frameCount = 0;
+            uploadsInFlight = 0;
+            if (ENABLE_ON_DEVICE_DEPTH && typeof window.initDepth === 'function') {
+                window.initDepth();
+            }
 
             // iOS needs an explicit tap before compass events fire.
             if (
@@ -1186,6 +1198,7 @@
         // On-device depth update (non-blocking)
         // ============================================================
         async function maybeUpdateDepth(canvas) {
+            if (!ENABLE_ON_DEVICE_DEPTH) return;
             if (depthBusy) return;
             if (frameCount % DEPTH_EVERY_N !== 0) return;
             if (typeof window.computeDepthMeters !== 'function') return;
@@ -1210,16 +1223,25 @@
         // ============================================================
         // Process frame
         // ============================================================
+        function scheduleNextFrame() {
+            if (!isRunning) return;
+            if (uploadsInFlight >= MAX_UPLOADS_IN_FLIGHT) return;
+            requestAnimationFrame(() => processFrame());
+        }
+
         async function processFrame() {
             if (!isRunning) return;
+            if (uploadsInFlight >= MAX_UPLOADS_IN_FLIGHT) return;
 
             frameCount++;
+            uploadsInFlight++;
 
             // Check video is still ready
             if (!video.videoWidth || !video.videoHeight) {
                 dbg('ERROR: video lost dimensions');
                 commandDiv.textContent = 'Camera Error';
                 detailsDiv.textContent = 'Video stream lost';
+                uploadsInFlight--;
                 stopNavigation();
                 return;
             }
@@ -1231,6 +1253,7 @@
                 dbg('ERROR drawing video to canvas:', e.message);
                 commandDiv.textContent = 'Capture Error';
                 detailsDiv.textContent = e.message;
+                uploadsInFlight--;
                 stopNavigation();
                 return;
             }
@@ -1242,9 +1265,11 @@
             captureCanvas.toBlob(async (blob) => {
                 if (!blob) {
                     dbg('ERROR: toBlob returned null');
+                    uploadsInFlight--;
+                    scheduleNextFrame();
                     return;
                 }
-                
+
                 const formData = new FormData();
                 formData.append('frame', blob, 'frame.jpg');
                 if (lastPosition.lat      != null) formData.append('lat',      String(lastPosition.lat));
@@ -1265,8 +1290,11 @@
                     const result = await response.json();
                     const rtt = Date.now() - t0;
 
-                    // ── Command text ──
-                    commandDiv.textContent = result.phrase;
+                    // ── Command text (skip stale snapshots if we already showed fresher) ──
+                    if (!result.stale || result.phrase !== lastPhrase) {
+                        commandDiv.textContent = result.phrase;
+                        lastPhrase = result.phrase;
+                    }
 
                     // ── Details / route cue ──
                     let detailText = result.rationale || '';
@@ -1304,7 +1332,16 @@
                         detailText = (detailText ? detailText + ' · ' : '') +
                             '⚠ Walk a few steps so heading can be detected';
                     }
-                    detailsDiv.textContent = detailText;
+                    const latencyBits = [
+                        `rtt ${rtt}ms`,
+                        result.processing_time_ms != null
+                            ? `srv ${result.processing_time_ms}ms`
+                            : null,
+                        result.stale ? 'cached' : null,
+                    ].filter(Boolean).join(' · ');
+                    detailsDiv.textContent = detailText
+                        ? detailText + ' · ' + latencyBits
+                        : latencyBits;
 
                     // ── Route status strip ──
                     if ((result.facts && result.facts.route_cue) || (rs && rs.destination_set)) {
@@ -1349,12 +1386,10 @@
                     commandDiv.textContent = 'Error';
                     detailsDiv.textContent = error.message;
                     connStatus.classList.remove('connected');
+                } finally {
+                    uploadsInFlight--;
+                    scheduleNextFrame();
                 }
-
-                // ── No fixed delay — fire next frame immediately after response ──
-                // This means latency = network RTT + server processing only.
-                // No extra 300ms wait added on top.
-                if (isRunning) processFrame();
             }, 'image/jpeg', JPEG_QUALITY);
         }
 
@@ -1551,9 +1586,11 @@
         };
 
         window.initDepth = initDepth;
-        // Kick off the (cached) model download immediately so it's ready by
-        // the time the user taps Start.
-        initDepth();
+        if (ENABLE_ON_DEVICE_DEPTH) {
+            initDepth();
+        } else {
+            window.__depthStatus = 'off (add ?depth=1 to enable)';
+        }
     </script>
 </body>
 </html>

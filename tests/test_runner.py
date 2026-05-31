@@ -298,6 +298,36 @@ def test_depth_uses_client_external_value():
     assert depth.metadata["source"] == "client_depth_anything"
 
 
+def test_process_frame_honors_client_depth_without_depth_est():
+    """Cloud/phone path passes depth_est=None but must still use depth_m."""
+    settings = _silent_settings()
+    segmenter = _walkable_with_center_obstacle()
+    care = CareNavigator(settings)
+    interpreter = NavigationInterpreter(settings)
+    validator = CommandValidator(settings)
+    tts = SpeechEngine(settings)
+    from navigation.reasoning.composer import PhraseComposer
+    from navigation.reasoning.spatial_reasoner import SpatialReasoner
+
+    frame = np.full((240, 320, 3), 128, dtype=np.uint8)
+    record = process_frame(
+        frame,
+        frame_id=0,
+        settings=settings,
+        segmenter=segmenter,
+        depth_est=None,
+        care=care,
+        interpreter=interpreter,
+        validator=validator,
+        tts=tts,
+        spatial_reasoner=SpatialReasoner(settings),
+        composer=PhraseComposer(settings),
+        client_depth_m=0.6,
+    )
+    facts = record.get("facts") or {}
+    assert facts.get("distance_bucket") == "immediate", facts
+
+
 def test_llm_short_circuits_on_hazard_without_calling_chain():
     """When CARE flags hazard, the LLM path must not invoke the chain."""
     settings = _silent_settings(use_llm=True)

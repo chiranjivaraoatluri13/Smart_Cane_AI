@@ -197,6 +197,7 @@ def process_frame(
     use_legacy_reasoner: bool = False,
     position: Position | None = None,
     client_depth_m: float | None = None,
+    cached_segmentation: SegmentationResult | None = None,
     show_seg: bool = False,
     seg_save_dir: Path | None = None,
     seg_block: bool = False,
@@ -209,7 +210,10 @@ def process_frame(
         return time.perf_counter()
 
     t0 = _t() if bench else 0.0
-    seg = segmenter.predict(frame)
+    if cached_segmentation is not None:
+        seg = cached_segmentation
+    else:
+        seg = segmenter.predict(frame)
     if bench:
         timings["seg"] = (_t() - t0) * 1000
 
@@ -221,9 +225,23 @@ def process_frame(
             external_depth_m=client_depth_m,
         )
     else:
-        # Depth skipped on cloud — use a safe default (mid-range)
-        from navigation.models import DepthResult
-        depth = DepthResult(center_depth_m=2.0, obstacle_depth_m=2.0, min_depth_m=1.5)
+        # No UniDepth on cloud/phone — still honor client depth_m and the
+        # segmentation geometric proxy (DepthEstimator is lightweight).
+        from navigation.perception.depth import DepthEstimator
+
+        proxy = DepthEstimator(settings)
+        try:
+            depth = proxy.predict(
+                frame,
+                segmentation=seg,
+                external_depth_m=client_depth_m,
+            )
+        except ValueError:
+            from navigation.models import DepthResult
+
+            depth = DepthResult(
+                center_depth_m=2.0, obstacle_depth_m=2.0, min_depth_m=1.5
+            )
     if bench:
         timings["depth"] = (_t() - t0) * 1000
 

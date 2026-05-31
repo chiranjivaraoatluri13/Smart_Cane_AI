@@ -17,11 +17,11 @@ Environment variables to set in Render dashboard:
   TTS_ENABLED=false
   USE_LLM=false
   USE_CARE_HTTP=false
-  COMMAND_COOLDOWN_SEC=8.0
-  COMMAND_DWELL_FRAMES=4
+  COMMAND_COOLDOWN_SEC=1.5
+  COMMAND_DWELL_FRAMES=1
   MIN_SPEECH_GAP_SEC=3.0
-  STOP_HOLD_FRAMES=8
-  HAZARD_OBSTACLE_RATIO=0.10
+  STOP_HOLD_FRAMES=4
+  HAZARD_OBSTACLE_RATIO=0.12
   ALERTS_ENABLED=true
   ALERT_MIN_WEIGHTED_PIXELS=1500.0
   ALERT_MAX_SIMULTANEOUS_CATEGORIES=2
@@ -59,6 +59,7 @@ from navigation.maps.router import geocode_address, reverse_geocode, search_plac
 from navigation.models import Position
 from navigation.output.validator import CommandValidator
 from navigation.output.voice_queue import VoiceQueue
+from navigation.perception.depth import DepthEstimator
 from navigation.perception.segmentation_base import build_segmenter
 from navigation.output.tts import SpeechEngine
 from navigation.reasoning.alerts import AlertTracker
@@ -83,7 +84,8 @@ print(
 # ADE20K SegFormer segmenter (indoor + outdoor, no closed-set hallucination).
 segmenter = build_segmenter(settings)
 _warmup_segmenter(segmenter, settings)
-# Skip depth estimation on cloud - use default "mid" distance
+# Lightweight depth adapter (client depth_m + seg proxy; no UniDepth).
+depth_est = DepthEstimator(settings)
 care = CareNavigator(settings)
 interpreter = NavigationInterpreter(settings)
 validator = CommandValidator(settings)
@@ -101,7 +103,7 @@ print("Models loaded! Cloud server ready.")
 frame_id = 0
 last_process_time = 0
 _pipeline_lock = threading.Lock()
-_is_processing = False  # non-blocking busy flag
+_last_response: dict | None = None  # instant reply while inference is busy
 
 
 def _optional_float(value):
@@ -222,9 +224,19 @@ def set_destination():
     return jsonify({"ok": True, "lat": lat, "lon": lon, "address": address or f"{lat},{lon}"}), 200
 
 
+def _depth_source_label(client_depth_m: float | None, record: dict) -> str:
+    """Reflect which depth path the pipeline actually used."""
+    if client_depth_m is not None:
+        return "client"
+    facts = record.get("facts") or {}
+    if facts.get("distance_bucket"):
+        return "proxy"
+    return "default"
+
+
 @app.route("/process_frame", methods=["POST"])
 def process_frame_endpoint():
-    global frame_id, last_process_time
+    global frame_id, last_process_time, _last_response
     start_time = time.time()
 
     try:
@@ -248,13 +260,29 @@ def process_frame_endpoint():
         # Absent => the pipeline falls back to its geometric proxy.
         client_depth_m = _optional_float(request.form.get("depth_m"))
 
-        with _pipeline_lock:
+        # If the previous frame is still inferring, return the last JSON
+        # immediately so the phone UI is not blocked for another full RTT.
+        if not _pipeline_lock.acquire(blocking=False):
+            if _last_response is not None:
+                fast = dict(_last_response)
+                fast["stale"] = True
+                fast["processing_time_ms"] = 0
+                return jsonify(fast)
+            _pipeline_lock.acquire()
+
+        try:
+            active_settings = interpreter.settings
+            n = max(1, int(active_settings.process_every_n_frames))
+            cached_seg = None
+            if frame_id % n != 0:
+                cached_seg = segmenter.last_segmentation
+
             record = process_frame(
                 frame,
                 frame_id=frame_id,
-                settings=interpreter.settings,
+                settings=active_settings,
                 segmenter=segmenter,
-                depth_est=None,  # Skip depth estimation (saves 28ms)
+                depth_est=depth_est,
                 care=care,
                 interpreter=interpreter,
                 validator=validator,
@@ -266,42 +294,48 @@ def process_frame_endpoint():
                 trend_tracker=trend_tracker,
                 position=position,
                 client_depth_m=client_depth_m,
+                cached_segmentation=cached_seg,
             )
             process_time = time.time() - start_time
             fps = 1.0 / process_time if process_time > 0 else 0
             frame_id += 1
             last_process_time = process_time
 
-        response = {
-            "command": record["command"],
-            "confidence": record["confidence"],
-            "phrase": record["phrase"],
-            "speak": record["speak"],
-            "rationale": record["rationale"],
-            "frame_id": frame_id,
-            "processing_time_ms": int(process_time * 1000),
-            "fps": round(fps, 1),
-            "alerts": record.get("alerts", []),
-            "route_status": {
-                "destination_set": interpreter.settings.map_destination_set,
-                "loading": interpreter.is_route_loading(),
-                "active": getattr(interpreter, "_map_guidance", None) is not None,
-                "failed": getattr(interpreter, "_route_permanent_failure", False),
-            },
-        }
-        if "facts" in record:
-            response["facts"] = record["facts"]
-        response["depth_source"] = (
-            "client" if client_depth_m is not None else "proxy"
-        )
+            response = {
+                "command": record["command"],
+                "confidence": record["confidence"],
+                "phrase": record["phrase"],
+                "speak": record["speak"],
+                "rationale": record["rationale"],
+                "frame_id": frame_id,
+                "processing_time_ms": int(process_time * 1000),
+                "fps": round(fps, 1),
+                "stale": False,
+                "seg_cached": cached_seg is not None,
+                "alerts": record.get("alerts", []),
+                "route_status": {
+                    "destination_set": active_settings.map_destination_set,
+                    "loading": interpreter.is_route_loading(),
+                    "active": getattr(interpreter, "_map_guidance", None) is not None,
+                    "failed": getattr(interpreter, "_route_permanent_failure", False),
+                },
+            }
+            if "facts" in record:
+                response["facts"] = record["facts"]
+            response["depth_source"] = _depth_source_label(client_depth_m, record)
 
-        print(
-            f"Frame {frame_id}: {record['command'].upper()} "
-            f"({'VOICE' if record.get('speak') else 'silent'}, "
-            f"{int(process_time * 1000)}ms, "
-            f"depth={response['depth_source']})"
-        )
-        return jsonify(response)
+            _last_response = response
+
+            print(
+                f"Frame {frame_id}: {record['command'].upper()} "
+                f"({'VOICE' if record.get('speak') else 'silent'}, "
+                f"{int(process_time * 1000)}ms, "
+                f"depth={response['depth_source']}"
+                f"{', seg_cached' if cached_seg is not None else ''})"
+            )
+            return jsonify(response)
+        finally:
+            _pipeline_lock.release()
 
     except Exception as e:
         import traceback

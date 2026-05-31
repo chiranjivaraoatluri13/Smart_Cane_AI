@@ -21,6 +21,7 @@ import numpy as np
 from navigation.config import load_settings
 from navigation.maps.router import geocode_address, reverse_geocode, search_places
 from navigation.models import Position
+from navigation.perception.depth import DepthEstimator
 from navigation.pipeline.runner import (
     _build_pipeline_components,
     process_frame as run_process_frame,
@@ -33,7 +34,7 @@ print("Loading navigation models...")
 settings = load_settings()
 (
     segmenter,
-    depth_est,
+    _full_depth_est,
     care,
     interpreter,
     validator,
@@ -44,6 +45,8 @@ settings = load_settings()
     voice_queue,
     trend_tracker,
 ) = _build_pipeline_components(settings)
+# Phone path: lightweight proxy + client depth_m (skip UniDepth on upload path).
+depth_est = DepthEstimator(settings)
 print("Models loaded! Server ready.")
 
 frame_id = 0
@@ -266,7 +269,7 @@ def process_frame_endpoint():
                 frame_id=frame_id,
                 settings=interpreter.settings,
                 segmenter=segmenter,
-                depth_est=None,          # skip depth — saves ~28ms
+                depth_est=depth_est,
                 care=care,
                 interpreter=interpreter,
                 validator=validator,

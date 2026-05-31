@@ -75,7 +75,9 @@ class Settings(BaseSettings):
 
     command_cooldown_sec: float = 2.0
     repeat_command_suppress: bool = True
-    hazard_obstacle_ratio: float = 0.02
+    # Fraction of the center third (region-weighted) that must be obstacle
+    # before vision_stop / CARE hazard. Lower = more sensitive.
+    hazard_obstacle_ratio: float = 0.08
     # Anti-jitter knobs (used by CommandValidator):
     # - dwell_frames: a non-STOP command must be the reasoner's pick for at
     #   least N consecutive inference frames before it's spoken. Kills
@@ -88,7 +90,7 @@ class Settings(BaseSettings):
     # STOP for this many subsequent frames even if the obstacle ratio dips
     # back below the rising threshold. Combined with a 0.6× falling-edge
     # threshold, this prevents STOP/SLOW_DOWN oscillation around the boundary.
-    stop_hold_frames: int = 8
+    stop_hold_frames: int = 4
 
     # Proximity alert tuning (AlertTracker). The default model hallucinates
     # street classes (car/bicycle/truck/person) on indoor or empty scenes;
@@ -107,6 +109,7 @@ class Settings(BaseSettings):
     # PhraseComposer, SpatialReasoner) don't have to re-parse YAML on the
     # hot path. Real values come from yaml_config() at startup.
     min_lane_walkable_ratio: float = 0.10
+    min_center_walkable_for_forward: float = 0.18
     status_update_interval_sec: float = 10.0
     voice_cooldowns: dict[str, float] = Field(
         default_factory=lambda: {
@@ -195,6 +198,10 @@ def apply_cloud_profile(settings: Settings) -> Settings:
         updates["inference_imgsz"] = 192
     if int(getattr(settings, "onnx_intra_op_threads", 0) or 0) <= 0:
         updates["onnx_intra_op_threads"] = 1
+    # Phone server runs full inference every request; frame skipping is handled
+    # in phone_server_cloud via cached_segmentation (not the laptop display loop).
+    if int(settings.process_every_n_frames or 0) <= 0:
+        updates["process_every_n_frames"] = 1
     return settings.model_copy(update=updates)
 
 

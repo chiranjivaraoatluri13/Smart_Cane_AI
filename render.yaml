@@ -8,8 +8,9 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      # Reuse segmentation on skipped frames (phone_server_cloud); 2 ≈ halves seg cost.
       - key: PROCESS_EVERY_N_FRAMES
-        value: "10"
+        value: "2"
       - key: SEGMENTER_BACKEND
         value: segformer_onnx
       - key: SEGFORMER_MODEL_ID
@@ -35,11 +36,11 @@ services:
       - key: USE_CARE_HTTP
         value: "false"
       - key: COMMAND_COOLDOWN_SEC
-        value: "4.0"
-      - key: COMMAND_DWELL_FRAMES
-        value: "2"
-      - key: MIN_SPEECH_GAP_SEC
         value: "1.5"
+      - key: COMMAND_DWELL_FRAMES
+        value: "1"
+      - key: MIN_SPEECH_GAP_SEC
+        value: "1.0"
       - key: STOP_HOLD_FRAMES
         value: "8"
       - key: HAZARD_OBSTACLE_RATIO

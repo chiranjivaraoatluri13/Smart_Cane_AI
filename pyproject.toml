@@ -23,6 +23,7 @@ segformer = [
     "torch>=2.1",
     "transformers>=4.42",
     "pillow>=10.0",
+    "onnxruntime>=1.18",
 ]
 llm = [
     "langchain>=0.3",
@@ -34,6 +35,7 @@ tts = [
 ]
 server = [
     "flask>=3.0",
+    "onnxruntime>=1.18",
 ]
 dev = [
     "pytest>=8.0",

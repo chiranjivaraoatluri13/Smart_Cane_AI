@@ -208,6 +208,8 @@ def set_destination():
         return jsonify({'ok': False, 'error': 'missing_address'}), 400
 
     global settings
+    near_lat = _optional_float(request.form.get('near_lat'))
+    near_lon = _optional_float(request.form.get('near_lon'))
     with _pipeline_lock:
         interpreter.settings = interpreter.settings.model_copy(
             update={
@@ -222,6 +224,9 @@ def set_destination():
         else:
             interpreter._map_guidance = None
             interpreter._map_route_attempted = False
+        if near_lat is not None and near_lon is not None:
+            if hasattr(interpreter, 'prefetch_map_guidance'):
+                interpreter.prefetch_map_guidance(near_lat, near_lon)
 
     label = address or f'{lat},{lon}'
     return jsonify({'ok': True, 'lat': lat, 'lon': lon, 'address': label}), 200

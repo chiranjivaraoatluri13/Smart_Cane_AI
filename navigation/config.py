@@ -134,6 +134,9 @@ class Settings(BaseSettings):
     route_off_route_m: float = 30.0
     route_refetch_off_route_m: float = 45.0
     route_bearing_align_deg: float = 15.0
+    # Walking route provider: "osrm" (free) or "google" (Directions API).
+    route_provider: str = "osrm"
+    google_maps_api_key: str = ""
     # OSRM foot-routing endpoint (override via OSRM_BASE_URL env).
     osrm_base_url: str = ""
     route_debug_path: str = "output/route.json"

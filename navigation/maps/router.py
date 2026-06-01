@@ -110,6 +110,51 @@ def fetch_route(
     client: httpx.Client | None = None,
     osrm_base: str | None = None,
     max_attempts: int = 3,
+    route_provider: str | None = None,
+    google_maps_api_key: str | None = None,
+) -> RoutePlan:
+    """Fetch a walking route (Google Directions or OSRM fallback).
+
+    Routing runs off the hot path (background thread at destination set).
+    """
+    provider = (route_provider or os.environ.get("ROUTE_PROVIDER", "osrm")).strip().lower()
+    api_key = (google_maps_api_key or os.environ.get("GOOGLE_MAPS_API_KEY", "")).strip()
+
+    if provider == "google" and api_key:
+        try:
+            from navigation.maps.google_directions import fetch_google_route
+
+            return fetch_google_route(
+                start_lat,
+                start_lon,
+                dest_lat,
+                dest_lon,
+                api_key=api_key,
+                client=client,
+            )
+        except Exception as e:
+            logger.warning("Google route fetch failed, falling back to OSRM: %s", e)
+
+    return _fetch_route_osrm(
+        start_lat,
+        start_lon,
+        dest_lat,
+        dest_lon,
+        client=client,
+        osrm_base=osrm_base,
+        max_attempts=max_attempts,
+    )
+
+
+def _fetch_route_osrm(
+    start_lat: float,
+    start_lon: float,
+    dest_lat: float,
+    dest_lon: float,
+    *,
+    client: httpx.Client | None = None,
+    osrm_base: str | None = None,
+    max_attempts: int = 3,
 ) -> RoutePlan:
     """Fetch a foot route from OSRM."""
     bases = _osrm_base_candidates(osrm_base)

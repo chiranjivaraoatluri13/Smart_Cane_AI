@@ -105,6 +105,69 @@ def test_fetch_route_mocked(sample_route):
     assert len(route.waypoints) == len(sample_route.waypoints)
 
 
+def test_fetch_route_google_mocked():
+    from navigation.maps.google_directions import decode_polyline
+
+    points = "_p~iF~ps|U_ulLnnqC_mqNvxq`@"
+    assert len(decode_polyline(points)) >= 2
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "maps.googleapis.com" in str(request.url)
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "routes": [
+                    {
+                        "overview_polyline": {"points": points},
+                        "legs": [{"distance": {"value": 420}, "duration": {"value": 300}}],
+                    }
+                ],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as client:
+        route = fetch_route(
+            38.5,
+            -77.0,
+            38.51,
+            -77.01,
+            client=client,
+            route_provider="google",
+            google_maps_api_key="test-key",
+        )
+    assert route.distance_m == 420
+    assert route.duration_s == 300
+    assert len(route.waypoints) >= 2
+
+
+def test_fetch_route_google_falls_back_to_osrm(sample_route):
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if "maps.googleapis.com" in str(request.url):
+            return httpx.Response(200, json={"status": "REQUEST_DENIED"})
+        return httpx.Response(200, json=payload)
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as client:
+        route = fetch_route(
+            40.7484,
+            -73.9857,
+            40.7510,
+            -73.9830,
+            client=client,
+            route_provider="google",
+            google_maps_api_key="bad-key",
+        )
+    assert any("maps.googleapis.com" in u for u in calls)
+    assert any("router.project-osrm.org" in u for u in calls)
+    assert len(route.waypoints) == len(sample_route.waypoints)
+
+
 def test_resolve_route_cue_uses_interpreter_settings():
     """Route fetch must not be skipped when module settings lag interpreter."""
     from navigation.config import Settings

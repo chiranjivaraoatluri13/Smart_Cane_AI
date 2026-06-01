@@ -89,6 +89,8 @@ class NavigationInterpreter:
                 self.settings.dest_lat,
                 self.settings.dest_lon,
                 osrm_base=osrm,
+                route_provider=getattr(self.settings, "route_provider", "osrm"),
+                google_maps_api_key=getattr(self.settings, "google_maps_api_key", ""),
             )
             with self._route_fetch_lock:
                 if generation != self._route_generation:
@@ -158,7 +160,40 @@ class NavigationInterpreter:
                     self._route_fetch_started = False
 
         threading.Thread(
-            target=_fetch, daemon=True, name="osrm-route-fetch"
+            target=_fetch, daemon=True, name="route-fetch"
+        ).start()
+
+    def prefetch_map_guidance(self, start_lat: float, start_lon: float) -> None:
+        """Start route fetch immediately after destination is set (background).
+
+        Does not block /process_frame — route is ready before the user taps Start
+        when the phone sends near_lat/near_lon with /set_destination.
+        """
+        if not self.settings.use_map_guidance:
+            return
+        if self.settings.dest_lat is None or self.settings.dest_lon is None:
+            return
+        with self._route_fetch_lock:
+            if self._map_guidance is not None:
+                return
+            if self._route_permanent_failure:
+                return
+            if self._route_fetch_started:
+                return
+            if self._map_route_attempted:
+                return
+            self._route_fetch_started = True
+            generation = self._route_generation
+
+        def _fetch() -> None:
+            try:
+                self._init_map_guidance(start_lat, start_lon, generation=generation)
+            finally:
+                with self._route_fetch_lock:
+                    self._route_fetch_started = False
+
+        threading.Thread(
+            target=_fetch, daemon=True, name="route-fetch-prefetch"
         ).start()
 
     def maybe_refetch_route(self, position: Position, cross_track_m: float) -> None:

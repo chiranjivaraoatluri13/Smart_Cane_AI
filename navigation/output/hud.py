@@ -133,6 +133,107 @@ def _wrap_text(text: str, font, max_width: int, draw) -> list[str]:
     return lines
 
 
+def _horizontal_padding(w: int, *, ratio: float = 0.10) -> int:
+    return max(12, int(w * ratio))
+
+
+def _safe_text_width(w: int, *, ratio: float = 0.10) -> int:
+    pad = _horizontal_padding(w, ratio=ratio)
+    return max(32, w - 2 * pad)
+
+
+def _line_metrics(draw, line: str, font) -> tuple[int, int]:
+    bb = draw.textbbox((0, 0), line, font=font)
+    return bb[2] - bb[0], bb[3] - bb[1]
+
+
+def _wrapped_block_metrics(
+    draw, lines: list[str], font, *, line_gap: int
+) -> tuple[int, int, list[int], list[int]]:
+    line_widths: list[int] = []
+    line_heights: list[int] = []
+    for line in lines:
+        lw, lh = _line_metrics(draw, line, font)
+        line_widths.append(lw)
+        line_heights.append(lh)
+    block_w = max(line_widths, default=0)
+    block_h = 0
+    if line_heights:
+        block_h = sum(line_heights) + line_gap * max(0, len(line_heights) - 1)
+    return block_w, block_h, line_widths, line_heights
+
+
+def _fit_wrapped_text(
+    text: str,
+    draw,
+    *,
+    start_size: int,
+    min_size: int,
+    max_width: int,
+    bold: bool,
+    line_gap: int,
+    max_block_height: int | None = None,
+) -> tuple[object, list[str], list[int], list[int], int]:
+    """Shrink font until wrapped text fits width (and optional height)."""
+    size = start_size
+    step = max(1, start_size // 12)
+    font = _load_phone_font(size, bold=bold)
+    lines: list[str] = []
+    line_widths: list[int] = []
+    line_heights: list[int] = []
+    block_h = 0
+
+    while size >= min_size:
+        font = _load_phone_font(size, bold=bold)
+        lines = _wrap_text(text, font, max_width, draw)
+        block_w, block_h, line_widths, line_heights = _wrapped_block_metrics(
+            draw, lines, font, line_gap=line_gap
+        )
+        fits_width = block_w <= max_width
+        fits_height = max_block_height is None or block_h <= max_block_height
+        if fits_width and fits_height:
+            return font, lines, line_widths, line_heights, block_h
+        size -= step
+
+    font = _load_phone_font(min_size, bold=bold)
+    lines = _wrap_text(text, font, max_width, draw)
+    _, block_h, line_widths, line_heights = _wrapped_block_metrics(
+        draw, lines, font, line_gap=line_gap
+    )
+    return font, lines, line_widths, line_heights, block_h
+
+
+def _draw_wrapped_shadow_block(
+    draw,
+    *,
+    lines: list[str],
+    line_heights: list[int],
+    line_widths: list[int],
+    font,
+    fill: tuple[int, int, int],
+    shadow_rgba: tuple[int, int, int, int],
+    frame_w: int,
+    start_y: int,
+    line_gap: int,
+) -> int:
+    """Draw centered wrapped lines; return y after last line."""
+    y = start_y
+    for i, line in enumerate(lines):
+        lx = max(0, (frame_w - line_widths[i]) // 2)
+        _draw_text_shadow(
+            draw,
+            (lx, y),
+            line,
+            font=font,
+            fill=fill,
+            shadow_rgba=shadow_rgba,
+        )
+        y += line_heights[i]
+        if i < len(lines) - 1:
+            y += line_gap
+    return y
+
+
 def _draw_text_shadow(
     draw,
     xy: tuple[int, int],
@@ -257,81 +358,129 @@ def draw_sparse_navigation_hud(
     overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    command_text = phrase.strip().upper()
-    command_size = _scale_px(48, h)
-    details_size = _scale_px(16, h)
-    route_size = _scale_px(15, h)
-    command_font = _load_phone_font(command_size, bold=True)
-    details_font = _load_phone_font(details_size, bold=False)
-    route_font = _load_phone_font(route_size, bold=False)
+    safe_w = _safe_text_width(w)
+    top_safe = max(16, _scale_px(24, h))
+    bottom_safe = max(16, _scale_px(32, h))
+    cmd_line_gap = max(4, _scale_px(6, h))
+    detail_line_gap = max(6, _scale_px(8, h))
+    cmd_detail_gap = max(8, _scale_px(12, h))
 
-    cmd_bbox = draw.textbbox((0, 0), command_text, font=command_font)
-    cmd_w = cmd_bbox[2] - cmd_bbox[0]
-    cmd_h = cmd_bbox[3] - cmd_bbox[1]
-    cmd_x = max(0, (w - cmd_w) // 2)
+    command_text = phrase.strip().upper()
+    command_start = _scale_px(48, h)
+    command_min = max(18, _scale_px(24, h))
+    details_start = _scale_px(16, h)
+    details_min = max(11, _scale_px(12, h))
+    route_start = _scale_px(15, h)
+    route_min = max(10, _scale_px(11, h))
+    route_pill_pad_y = max(8, _scale_px(8, h))
+    route_pill_pad_x = max(16, _scale_px(20, h))
 
     details_text, route_status = build_live_detail_text(
         rationale=rationale, facts=facts
     )
-    details_max_w = min(w - 48, int(_LIVE_DETAILS_MAX_WIDTH_PX * w / 390))
-    detail_lines = _wrap_text(details_text, details_font, details_max_w, draw)
-
-    details_block_h = 0
-    line_heights: list[int] = []
-    if detail_lines:
-        gap = max(8, _scale_px(12, h))
-        for line in detail_lines:
-            bb = draw.textbbox((0, 0), line, font=details_font)
-            lh = bb[3] - bb[1]
-            line_heights.append(lh)
-            details_block_h += lh
-        details_block_h += gap * max(0, len(detail_lines) - 1)
 
     route_pill_h = 0
-    route_pill_pad_y = max(8, _scale_px(8, h))
-    route_pill_pad_x = max(16, _scale_px(20, h))
-    bottom_safe = max(16, _scale_px(32, h))
+    route_font = _load_phone_font(route_start, bold=False)
+    route_lines: list[str] = []
+    route_line_heights: list[int] = []
+    route_line_widths: list[int] = []
+    route_block_h = 0
+    route_inner_w = safe_w - route_pill_pad_x * 2
     if route_status:
-        rs_bbox = draw.textbbox((0, 0), route_status, font=route_font)
-        route_pill_h = (rs_bbox[3] - rs_bbox[1]) + route_pill_pad_y * 2
+        route_font, route_lines, route_line_widths, route_line_heights, route_block_h = (
+            _fit_wrapped_text(
+                route_status,
+                draw,
+                start_size=route_start,
+                min_size=route_min,
+                max_width=max(32, route_inner_w),
+                bold=False,
+                line_gap=max(4, _scale_px(4, h)),
+            )
+        )
+        route_pill_h = route_block_h + route_pill_pad_y * 2
 
-    block_h = cmd_h + (max(8, _scale_px(12, h)) if detail_lines else 0) + details_block_h
-    center_y = h // 2
+    available_h = h - top_safe - bottom_safe - route_pill_h
+    cmd_max_h = available_h
+    if details_text:
+        cmd_max_h = int(available_h * 0.72)
+
+    command_font, cmd_lines, cmd_line_widths, cmd_line_heights, cmd_block_h = (
+        _fit_wrapped_text(
+            command_text,
+            draw,
+            start_size=command_start,
+            min_size=command_min,
+            max_width=safe_w,
+            bold=True,
+            line_gap=cmd_line_gap,
+            max_block_height=cmd_max_h,
+        )
+    )
+
+    detail_lines: list[str] = []
+    detail_line_widths: list[int] = []
+    detail_line_heights: list[int] = []
+    details_block_h = 0
+    details_font = _load_phone_font(details_start, bold=False)
+    if details_text:
+        details_font, detail_lines, detail_line_widths, detail_line_heights, details_block_h = (
+            _fit_wrapped_text(
+                details_text,
+                draw,
+                start_size=details_start,
+                min_size=details_min,
+                max_width=safe_w,
+                bold=False,
+                line_gap=detail_line_gap,
+                max_block_height=max(0, available_h - cmd_block_h - cmd_detail_gap),
+            )
+        )
+
+    block_h = cmd_block_h
+    if detail_lines:
+        block_h += cmd_detail_gap + details_block_h
+
+    center_y = top_safe + available_h // 2
     if route_status:
-        center_y = int((h - route_pill_h - bottom_safe) * 0.48)
-    cmd_y = center_y - block_h // 2
+        center_y = top_safe + int(available_h * 0.46)
+    block_top = max(top_safe, center_y - block_h // 2)
+    if block_top + block_h > h - bottom_safe - route_pill_h:
+        block_top = max(top_safe, h - bottom_safe - route_pill_h - block_h)
 
-    _draw_text_shadow(
+    y = block_top
+    y = _draw_wrapped_shadow_block(
         draw,
-        (cmd_x, cmd_y),
-        command_text,
+        lines=cmd_lines,
+        line_heights=cmd_line_heights,
+        line_widths=cmd_line_widths,
         font=command_font,
         fill=_LIVE_COMMAND_RGB,
+        shadow_rgba=_LIVE_SHADOW_RGBA,
+        frame_w=w,
+        start_y=y,
+        line_gap=cmd_line_gap,
     )
 
     if detail_lines:
-        y = cmd_y + cmd_h + max(8, _scale_px(12, h))
-        for i, line in enumerate(detail_lines):
-            bb = draw.textbbox((0, 0), line, font=details_font)
-            lw = bb[2] - bb[0]
-            lx = max(0, (w - lw) // 2)
-            _draw_text_shadow(
-                draw,
-                (lx, y),
-                line,
-                font=details_font,
-                fill=_LIVE_DETAILS_RGB,
-                shadow_rgba=(0, 0, 0, 230),
-            )
-            y += line_heights[i] + max(6, _scale_px(8, h))
+        y += cmd_detail_gap
+        _draw_wrapped_shadow_block(
+            draw,
+            lines=detail_lines,
+            line_heights=detail_line_heights,
+            line_widths=detail_line_widths,
+            font=details_font,
+            fill=_LIVE_DETAILS_RGB,
+            shadow_rgba=(0, 0, 0, 230),
+            frame_w=w,
+            start_y=y,
+            line_gap=detail_line_gap,
+        )
 
-    if route_status:
-        rs_bbox = draw.textbbox((0, 0), route_status, font=route_font)
-        rs_w = rs_bbox[2] - rs_bbox[0]
-        rs_h = rs_bbox[3] - rs_bbox[1]
-        pill_w = min(w - 40, rs_w + route_pill_pad_x * 2)
-        pill_h = rs_h + route_pill_pad_y * 2
-        pill_x0 = (w - pill_w) // 2
+    if route_status and route_lines:
+        pill_w = min(safe_w, max(route_line_widths) + route_pill_pad_x * 2)
+        pill_h = route_block_h + route_pill_pad_y * 2
+        pill_x0 = max(_horizontal_padding(w), (w - pill_w) // 2)
         pill_y0 = h - bottom_safe - pill_h
         _rounded_rect(
             draw,
@@ -339,9 +488,17 @@ def draw_sparse_navigation_hud(
             radius=min(20, pill_h // 2),
             fill=_LIVE_ROUTE_PILL_RGBA,
         )
-        text_x = pill_x0 + (pill_w - rs_w) // 2
         text_y = pill_y0 + route_pill_pad_y
-        draw.text((text_x, text_y), route_status, font=route_font, fill=_LIVE_COMMAND_RGB)
+        route_line_gap = max(4, _scale_px(4, h))
+        for i, line in enumerate(route_lines):
+            text_x = pill_x0 + (pill_w - route_line_widths[i]) // 2
+            draw.text(
+                (text_x, text_y),
+                line,
+                font=route_font,
+                fill=_LIVE_COMMAND_RGB,
+            )
+            text_y += route_line_heights[i] + route_line_gap
 
     composed = Image.alpha_composite(base, overlay)
     out_rgb = np.asarray(composed.convert("RGB"))

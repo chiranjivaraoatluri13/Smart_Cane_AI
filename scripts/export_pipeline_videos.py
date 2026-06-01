@@ -18,8 +18,13 @@ proxy colormap is written instead and noted in the console.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
+import wave
 from pathlib import Path
 
 import cv2
@@ -31,7 +36,7 @@ if str(_ROOT) not in sys.path:
 
 from navigation.config import apply_cloud_profile, load_settings
 from navigation.models import SIDES
-from navigation.output.hud import draw_navigation_hud
+from navigation.output.hud import draw_navigation_hud, draw_sparse_navigation_hud
 from navigation.output.tts import SpeechEngine
 from navigation.output.validator import CommandValidator
 from navigation.perception.depth import DepthEstimator, _row_to_depth_m
@@ -48,6 +53,22 @@ from navigation.reasoning.trend import TrendTracker
 
 
 DEFAULT_OUTPUT = Path.home() / "OneDrive" / "Desktop" / "assistive-nav-demos"
+
+FOCUS_PHRASE_KEYWORDS = (
+    "person",
+    "approaching",
+    "car",
+    "curb",
+    "wall",
+    "clear path",
+    "clear",
+    "destination",
+    "heads up",
+    "crossing",
+    "blocking",
+)
+
+SPARSE_HUD_MIN_INTERVAL_SEC = 2.0
 
 EXPORTS = (
     ("01_segmentation_overlay.mp4", "seg_overlay"),
@@ -86,6 +107,16 @@ def parse_args() -> argparse.Namespace:
         "--skip-depth-anything",
         action="store_true",
         help="Force segmentation-proxy depth for 02 (faster).",
+    )
+    p.add_argument(
+        "--sparse-hud",
+        action="store_true",
+        help="Live demo: minimal caption on original frames → {stem}_hud.mp4.",
+    )
+    p.add_argument(
+        "--tts",
+        action="store_true",
+        help="With --sparse-hud: mux pyttsx3 (SAPI) audio → {stem}_hud_audio.mp4.",
     )
     return p.parse_args()
 
@@ -342,6 +373,285 @@ def draw_facts_strip(frame: np.ndarray, record: dict) -> np.ndarray:
     return out
 
 
+def _stem_hud_paths(video_path: Path, out_dir: Path) -> tuple[Path, Path]:
+    stem = video_path.stem
+    return out_dir / f"{stem}_hud_live.mp4", out_dir / f"{stem}_hud_live_audio.mp4"
+
+
+def _phrase_is_focus(text: str) -> bool:
+    low = text.lower()
+    return any(k in low for k in FOCUS_PHRASE_KEYWORDS)
+
+
+def _sparse_hud_update(
+    phrase: str,
+    *,
+    speak: bool,
+    now: float,
+    last_phrase: str,
+    last_update: float,
+    display_phrase: str,
+) -> tuple[bool, str, str, float]:
+    """Return (visible, display_phrase, last_phrase, last_update)."""
+    if not speak or not phrase.strip():
+        return bool(display_phrase), display_phrase, last_phrase, last_update
+    p = phrase.strip()
+    if p != last_phrase:
+        return True, p, p, now
+    if now - last_update >= SPARSE_HUD_MIN_INTERVAL_SEC:
+        return True, p, last_phrase, now
+    return bool(display_phrase), display_phrase, last_phrase, last_update
+
+
+def _tts_wav_path(cache_dir: Path, phrase: str, rate: int) -> Path:
+    key = hashlib.md5(f"{phrase}|{rate}".encode()).hexdigest()[:12]
+    path = cache_dir / f"tts_{key}.wav"
+    if path.is_file():
+        return path
+    import pyttsx3
+
+    engine = pyttsx3.init()
+    engine.setProperty("rate", rate)
+    engine.save_to_file(phrase, str(path))
+    engine.runAndWait()
+    return path
+
+
+def _read_wav_mono(path: Path) -> tuple[int, list[int]]:
+    with wave.open(str(path), "rb") as wf:
+        nch = wf.getnchannels()
+        rate = wf.getframerate()
+        sampwidth = wf.getsampwidth()
+        if sampwidth != 2:
+            raise ValueError(f"unsupported sample width: {sampwidth}")
+        frames = wf.readframes(wf.getnframes())
+    samples = list(
+        int.from_bytes(frames[i : i + 2], "little", signed=True)
+        for i in range(0, len(frames), 2 * nch)
+    )
+    if nch > 1:
+        samples = samples[::nch]
+    return rate, samples
+
+
+def _build_timeline_wav(
+    events: list[tuple[float, str]],
+    *,
+    duration_sec: float,
+    rate: int,
+    cache_dir: Path,
+    tts_rate: int,
+) -> Path:
+    n_samples = max(1, int(duration_sec * rate) + rate)
+    timeline = [0] * n_samples
+    for t_sec, phrase in events:
+        wav_path = _tts_wav_path(cache_dir, phrase, tts_rate)
+        clip_rate, clip = _read_wav_mono(wav_path)
+        if clip_rate != rate:
+            ratio = clip_rate / rate
+            clip = [
+                clip[min(len(clip) - 1, int(i * ratio))]
+                for i in range(int(len(clip) / ratio))
+            ]
+        start = int(t_sec * rate)
+        for i, sample in enumerate(clip):
+            idx = start + i
+            if idx >= n_samples:
+                break
+            timeline[idx] = max(-32768, min(32767, timeline[idx] + sample))
+    out_path = cache_dir / "timeline.wav"
+    with wave.open(str(out_path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(b"".join(int(s).to_bytes(2, "little", signed=True) for s in timeline))
+    return out_path
+
+
+def _mux_audio(video_path: Path, audio_wav: Path, out_path: Path) -> bool:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        print("  [tts] ffmpeg not found — skipping audio mux", flush=True)
+        return False
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(video_path),
+        "-i",
+        str(audio_wav),
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-shortest",
+        str(out_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return True
+    except subprocess.CalledProcessError as exc:
+        print(f"  [tts] ffmpeg failed: {exc.stderr or exc}", file=sys.stderr, flush=True)
+        return False
+
+
+def export_live_hud(args: argparse.Namespace) -> int:
+    """Single-pass live demo: original frame + sparse HUD (+ optional TTS mux)."""
+    video_path = Path(args.video)
+    if not video_path.exists():
+        print(f"ERROR: video not found: {video_path}", file=sys.stderr)
+        return 2
+
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    hud_path, hud_audio_path = _stem_hud_paths(video_path, out_dir)
+
+    print("Loading cloud-profile pipeline (live HUD export)...")
+    pipe = build_pipeline()
+    settings = pipe["settings"]
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        print(f"ERROR: cannot open video: {video_path}", file=sys.stderr)
+        return 3
+
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    stride = max(1, args.stride)
+    out_fps = src_fps / stride
+
+    writer = _open_writer(hud_path, out_fps, (width, height))
+    read_idx = 0
+    processed = 0
+    frame_id = 0
+    t0 = time.time()
+
+    display_phrase = ""
+    last_phrase = ""
+    last_update = 0.0
+    tts_events: list[tuple[float, str]] = []
+    phrases_seen: set[str] = set()
+    focus_phrases: set[str] = set()
+
+    print(
+        f"Live HUD: {width}x{height} stride={stride} -> {out_fps:.1f}fps | "
+        f"sparse={args.sparse_hud} tts={args.tts}"
+    )
+    print(f"Writing: {hud_path.resolve()}")
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if read_idx % stride != 0:
+            read_idx += 1
+            continue
+        read_idx += 1
+
+        t_sec = processed / out_fps
+        record = process_frame(
+            frame,
+            frame_id=frame_id,
+            settings=settings,
+            segmenter=pipe["segmenter"],
+            depth_est=pipe["depth_est"],
+            care=pipe["care"],
+            interpreter=pipe["interpreter"],
+            validator=pipe["validator"],
+            tts=pipe["tts"],
+            alert_tracker=pipe["alert_tracker"],
+            spatial_reasoner=pipe["spatial_reasoner"],
+            composer=pipe["composer"],
+            trend_tracker=pipe["trend_tracker"],
+            position=None,
+            client_depth_m=None,
+        )
+
+        phrase = str(record.get("phrase") or "").strip()
+        speak = bool(record.get("speak"))
+        if phrase:
+            phrases_seen.add(phrase)
+            if _phrase_is_focus(phrase):
+                focus_phrases.add(phrase)
+        for alert in record.get("alerts") or []:
+            ap = str(alert.get("phrase") or "").strip()
+            if ap:
+                phrases_seen.add(ap)
+                if _phrase_is_focus(ap):
+                    focus_phrases.add(ap)
+                if args.tts:
+                    tts_events.append((t_sec, ap))
+
+        visible, display_phrase, last_phrase, last_update = _sparse_hud_update(
+            phrase,
+            speak=speak,
+            now=t_sec,
+            last_phrase=last_phrase,
+            last_update=last_update,
+            display_phrase=display_phrase,
+        )
+        if args.tts and speak and phrase:
+            if not tts_events or tts_events[-1][1] != phrase:
+                tts_events.append((t_sec, phrase))
+
+        out_frame = draw_sparse_navigation_hud(
+            frame,
+            phrase=display_phrase,
+            visible=visible,
+            command=str(record.get("command") or ""),
+            rationale=str(record.get("rationale") or ""),
+            facts=record.get("facts"),
+            speak=bool(record.get("speak")),
+        )
+        writer.write(out_frame)
+        processed += 1
+        frame_id += 1
+        if processed % 15 == 0:
+            elapsed = time.time() - t0
+            print(f"  {processed} frames ({processed / max(elapsed, 0.1):.2f} fps)...", flush=True)
+        if args.max_frames and processed >= args.max_frames:
+            break
+
+    cap.release()
+    writer.release()
+    elapsed = time.time() - t0
+
+    if processed == 0:
+        print("ERROR: no frames written", file=sys.stderr)
+        return 5
+
+    duration_sec = processed / out_fps
+    audio_ok = False
+    if args.tts and tts_events:
+        print(f"  [tts] {len(tts_events)} speech events, building track...", flush=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            try:
+                wav = _build_timeline_wav(
+                    tts_events,
+                    duration_sec=duration_sec,
+                    rate=22050,
+                    cache_dir=cache,
+                    tts_rate=settings.tts_rate,
+                )
+                audio_ok = _mux_audio(hud_path, wav, hud_audio_path)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  [tts] failed: {exc}", file=sys.stderr, flush=True)
+
+    print(f"\nDone: {processed} frames in {elapsed:.1f}s ({elapsed / processed:.2f}s/frame)")
+    print(f"  hud: {hud_path.resolve()}")
+    if args.tts:
+        if audio_ok:
+            print(f"  hud+audio: {hud_audio_path.resolve()}")
+        else:
+            print("  hud+audio: (not created)")
+    print(f"  phrases ({len(phrases_seen)}): {sorted(phrases_seen)[:12]}{'…' if len(phrases_seen) > 12 else ''}")
+    if focus_phrases:
+        print(f"  focus matches: {sorted(focus_phrases)}")
+    return 0
+
+
 def build_pipeline():
     settings = apply_cloud_profile(load_settings())
     segmenter = build_segmenter(settings)
@@ -374,6 +684,13 @@ def build_pipeline():
 
 def main() -> int:
     args = parse_args()
+    if args.sparse_hud or args.tts:
+        if args.tts and not args.sparse_hud:
+            print("NOTE: --tts requires live export; enabling --sparse-hud.", flush=True)
+            args.sparse_hud = True
+        args.skip_depth_anything = True
+        return export_live_hud(args)
+
     video_path = Path(args.video)
     if not video_path.exists():
         print(f"ERROR: video not found: {video_path}", file=sys.stderr)

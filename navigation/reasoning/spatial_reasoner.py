@@ -17,6 +17,7 @@ from navigation.maps.router import (
     cross_track_distance_m,
     distance_to_destination,
     next_waypoint_ahead,
+    route_cue_distance_m,
     side_of_route,
 )
 from navigation.models import (
@@ -64,6 +65,7 @@ def _next_route_cue(
 
     route = map_guidance.route
     dest_dist = distance_to_destination(current_lat, current_lon, route)
+    near_dest_m = float(getattr(settings, "route_near_dest_m", 80.0))
 
     cross = cross_track_distance_m(current_lat, current_lon, route)
     if cross > settings.route_off_route_m:
@@ -85,7 +87,7 @@ def _next_route_cue(
         )
 
     _, dist_to_next, target_bearing = next_waypoint_ahead(
-        current_lat, current_lon, route
+        current_lat, current_lon, route, near_dest_m=near_dest_m
     )
     effective_heading = heading_deg
     if effective_heading is None:
@@ -100,12 +102,12 @@ def _next_route_cue(
         turn = "left"
     else:
         turn = "right"
-    if turn in ("left", "right"):
-        cue_dist = dist_to_next
-    elif dist_to_next <= 80.0:
-        cue_dist = dist_to_next
-    else:
-        cue_dist = dest_dist
+    cue_dist = route_cue_distance_m(
+        turn,
+        dest_dist,
+        dist_to_next,
+        near_dest_m=near_dest_m,
+    )
     return RouteCue(
         turn=turn,
         meters_to_turn=cue_dist,

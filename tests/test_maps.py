@@ -19,6 +19,7 @@ from navigation.maps.router import (
     fetch_route_from_json,
     geocode_address,
     next_waypoint_ahead,
+    route_cue_distance_m,
 )
 from navigation.models import NavigationCommand, CareResult, DepthResult, PerceptionBundle, SegmentationResult
 from navigation.reasoning.llm import NavigationInterpreter
@@ -321,6 +322,25 @@ def test_next_route_cue_off_route(sample_route):
     assert cue.turn in ("left", "right")
     assert cue.meters_to_turn > settings.route_off_route_m
     assert "off_route" in cue.rationale
+
+
+def test_next_waypoint_ahead_near_destination_targets_final_vertex(sample_route):
+    """Within near_dest_m, bearing/distance aim at destination not a far vertex."""
+    dest_lat, dest_lon = sample_route.destination
+    near_lat = dest_lat - 0.00012  # ~13 m south of destination
+    _, dist, _ = next_waypoint_ahead(
+        near_lat, dest_lon, sample_route, near_dest_m=80.0
+    )
+    dest_dist = distance_to_destination(near_lat, dest_lon, sample_route)
+    assert dist == pytest.approx(dest_dist, abs=1.0)
+    assert dist < 20.0
+
+
+def test_route_cue_distance_prefers_destination_when_close():
+    assert route_cue_distance_m("forward", 15.0, 62.0, near_dest_m=80.0) == 15.0
+    assert route_cue_distance_m("left", 15.0, 62.0, near_dest_m=80.0) == 15.0
+    assert route_cue_distance_m("forward", 200.0, 30.0, near_dest_m=80.0) == 30.0
+    assert route_cue_distance_m("forward", 200.0, 120.0, near_dest_m=80.0) == 200.0
 
 
 def test_obstacle_overrides_map_guidance(sample_route):

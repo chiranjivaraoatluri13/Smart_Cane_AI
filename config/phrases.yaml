@@ -18,6 +18,7 @@
 #   {turn_direction_cap} Left | Right | Forward
 #   {meters_to_turn}     numeric meters (rounded)
 #   {feet_to_turn}       numeric feet (rounded)
+#   {distance_remaining} just ahead | almost there | about N feet
 
 vision_stop_generic:
   - "Wait."
@@ -51,14 +52,14 @@ approach_alert_crossing:
   - "{category} moving across, hold a moment."
 
 map_turn_only:
-  - "In about {feet_to_turn} feet, take a {turn_direction}."
-  - "Take a {turn_direction} in about {feet_to_turn} feet."
-  - "{turn_direction_cap} turn coming up in about {feet_to_turn} feet."
+  - "{distance_remaining}, take a {turn_direction}."
+  - "Take a {turn_direction} {distance_remaining}."
+  - "{turn_direction_cap} turn {distance_remaining}."
 
 map_turn_with_vision_clear:
-  - "In about {feet_to_turn} feet, take a {turn_direction} — sidewalk is clear."
-  - "Path is clear. Take a {turn_direction} in about {feet_to_turn} feet."
-  - "Take a {turn_direction} in about {feet_to_turn} feet, your {turn_direction} is open."
+  - "{distance_remaining}, take a {turn_direction} — sidewalk is clear."
+  - "Path is clear. Take a {turn_direction} {distance_remaining}."
+  - "Take a {turn_direction} {distance_remaining}, your {turn_direction} is open."
 
 map_turn_with_caution:
   - "Take a {turn_direction} in a moment, but slow down — {category} ahead."
@@ -85,10 +86,10 @@ status_update_clear:
   - "Path looks good, walk on."
 
 status_update_progress:
-  - "Keep going, about {feet_to_turn} feet to your destination."
-  - "You're on track. Destination in about {feet_to_turn} feet."
-  - "Continue forward, about {feet_to_turn} feet to go."
-  - "Heading the right way. About {feet_to_turn} feet remaining."
+  - "Keep going, your destination is {distance_remaining}."
+  - "You're on track. Destination {distance_remaining}."
+  - "Continue forward, {distance_remaining} to go."
+  - "Heading the right way. {distance_remaining} remaining."
 
 stairs_warning_low_conf:
   - "Steps may be ahead — slow down."

@@ -666,8 +666,24 @@ def next_waypoint_ahead(
     current_lat: float,
     current_lon: float,
     route: RoutePlan,
+    *,
+    near_dest_m: float = 80.0,
 ) -> tuple[int, float, float]:
-    """Next route vertex index, distance to it (m), and bearing toward it."""
+    """Next route vertex index, distance to it (m), and bearing toward it.
+
+    When within ``near_dest_m`` of the destination, aim at the final waypoint
+    so GPS jitter on an earlier polyline segment does not report a distant
+    intermediate vertex as the next turn.
+    """
+    dest_lat, dest_lon = route.destination
+    dest_dist = distance_meters(current_lat, current_lon, dest_lat, dest_lon)
+    if dest_dist <= near_dest_m:
+        return (
+            len(route.waypoints) - 1,
+            dest_dist,
+            bearing_deg(current_lat, current_lon, dest_lat, dest_lon),
+        )
+
     seg_i, _ = _nearest_segment_index(current_lat, current_lon, route.waypoints)
     target_i = min(seg_i + 1, len(route.waypoints) - 1)
     t_lat, t_lon = route.waypoints[target_i]
@@ -677,6 +693,23 @@ def next_waypoint_ahead(
         t_lat, t_lon = route.waypoints[target_i]
         dist_to_target = distance_meters(current_lat, current_lon, t_lat, t_lon)
     return target_i, dist_to_target, bearing_deg(current_lat, current_lon, t_lat, t_lon)
+
+
+def route_cue_distance_m(
+    turn: str,
+    dest_dist: float,
+    dist_to_next: float,
+    *,
+    near_dest_m: float,
+) -> float:
+    """Spoken remaining distance — prefer destination when close."""
+    if dest_dist <= near_dest_m:
+        return min(dest_dist, dist_to_next)
+    if turn in ("left", "right"):
+        return dist_to_next
+    if dist_to_next <= near_dest_m:
+        return dist_to_next
+    return dest_dist
 
 
 def cross_track_distance_m(

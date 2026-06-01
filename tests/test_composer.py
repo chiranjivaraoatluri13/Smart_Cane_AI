@@ -297,3 +297,14 @@ def test_lane_blocked_all_sides():
     )
     phrase = composer.compose(facts)
     assert "block" in phrase.lower() or "slow" in phrase.lower() or "no clear" in phrase.lower()
+
+
+def test_progress_phrase_uses_almost_there_when_close():
+    composer = PhraseComposer(_settings())
+    facts = _facts(
+        command=NavigationCommand.GO_FORWARD,
+        route_cue=RouteCue(turn="forward", meters_to_turn=12.0, target_bearing_deg=90.0),
+    )
+    phrase = composer.compose(facts)
+    assert "almost there" in phrase.lower() or "just ahead" in phrase.lower()
+    assert "62" not in phrase

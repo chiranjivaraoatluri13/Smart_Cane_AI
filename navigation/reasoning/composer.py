@@ -173,6 +173,15 @@ class PhraseComposer:
             return "ahead"
         return f"on your {side}"
 
+    def _distance_remaining_phrase(self, meters: float) -> str:
+        """Human-friendly remaining distance — avoid false precision when close."""
+        if meters <= 8.0:
+            return "just ahead"
+        if meters <= 20.0:
+            return "almost there"
+        feet = int(round(meters * 3.281))
+        return f"about {feet} feet"
+
     def _placeholders(self, facts: GuidanceFacts) -> dict[str, str]:
         side = self._dominant_hazard_side(facts) or "center"
         opposite = {"left": "right", "right": "left", "center": "ahead"}[side]
@@ -182,6 +191,7 @@ class PhraseComposer:
         turn_direction = facts.route_cue.turn if facts.route_cue else "ahead"
         meters = facts.route_cue.meters_to_turn if facts.route_cue else 0.0
         feet = int(round(meters * 3.281)) if facts.route_cue else 0
+        distance_remaining = self._distance_remaining_phrase(meters)
 
         return {
             "distance_phrase": facts.distance_phrase,
@@ -194,6 +204,7 @@ class PhraseComposer:
             "turn_direction_cap": turn_direction.capitalize(),
             "meters_to_turn": f"{meters:.0f}",
             "feet_to_turn": f"{feet}",
+            "distance_remaining": distance_remaining,
         }
 
     def _has_named_cause(self, facts: GuidanceFacts) -> bool:

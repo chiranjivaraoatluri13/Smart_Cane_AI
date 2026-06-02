@@ -69,6 +69,8 @@ FOCUS_PHRASE_KEYWORDS = (
 )
 
 SPARSE_HUD_MIN_INTERVAL_SEC = 2.0
+TTS_GAP_SEC = 0.3
+TTS_MIN_INTERVAL_SEC = 2.5
 
 EXPORTS = (
     ("01_segmentation_overlay.mp4", "seg_overlay"),
@@ -403,18 +405,132 @@ def _sparse_hud_update(
     return bool(display_phrase), display_phrase, last_phrase, last_update
 
 
-def _tts_wav_path(cache_dir: Path, phrase: str, rate: int) -> Path:
+def _tts_wav_path(cache_dir: Path, phrase: str, rate: int, engine=None) -> Path:
+    del engine  # each synthesis runs in an isolated subprocess (avoids SAPI hangs)
     key = hashlib.md5(f"{phrase}|{rate}".encode()).hexdigest()[:12]
     path = cache_dir / f"tts_{key}.wav"
-    if path.is_file():
+    if path.is_file() and path.stat().st_size >= 44:
         return path
-    import pyttsx3
 
-    engine = pyttsx3.init()
-    engine.setProperty("rate", rate)
-    engine.save_to_file(phrase, str(path))
-    engine.runAndWait()
+    snippet = f"""
+import pyttsx3
+engine = pyttsx3.init()
+engine.setProperty("rate", {rate})
+engine.save_to_file({phrase!r}, {str(path)!r})
+engine.runAndWait()
+engine.stop()
+"""
+    if sys.platform == "win32":
+        snippet = "import pythoncom\npythoncom.CoInitialize()\n" + snippet
+
+    result = subprocess.run(
+        [sys.executable, "-c", snippet],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"TTS failed for {phrase!r}: {result.stderr or result.stdout or result.returncode}"
+        )
+    if not path.is_file() or path.stat().st_size < 44:
+        raise RuntimeError(f"TTS did not produce audio for: {phrase!r}")
     return path
+
+
+class _TtsClipCache:
+    """Cache synthesized WAV clips for timeline build."""
+
+    def __init__(self, cache_dir: Path, tts_rate: int, target_rate: int):
+        self.cache_dir = cache_dir
+        self.tts_rate = tts_rate
+        self.target_rate = target_rate
+        self._clips: dict[str, list[int]] = {}
+
+    def clip(self, phrase: str) -> list[int]:
+        key = _normalize_phrase(phrase)
+        cached = self._clips.get(key)
+        if cached is not None:
+            return cached
+        print(f"  [tts] synthesizing: {phrase[:60]}{'…' if len(phrase) > 60 else ''}", flush=True)
+        wav_path = _tts_wav_path(self.cache_dir, phrase, self.tts_rate)
+        clip_rate, raw = _read_wav_mono(wav_path)
+        resampled = _resample_mono(raw, clip_rate, self.target_rate)
+        self._clips[key] = resampled
+        return resampled
+
+
+def _normalize_phrase(phrase: str) -> str:
+    return " ".join(phrase.strip().lower().split())
+
+
+def _phrases_similar(a: str, b: str) -> bool:
+    na, nb = _normalize_phrase(a), _normalize_phrase(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    if na in nb or nb in na:
+        return True
+    return False
+
+
+def _resample_mono(clip: list[int], clip_rate: int, target_rate: int) -> list[int]:
+    if clip_rate == target_rate:
+        return clip
+    ratio = clip_rate / target_rate
+    return [
+        clip[min(len(clip) - 1, int(i * ratio))]
+        for i in range(int(len(clip) / ratio))
+    ]
+
+
+def _phrase_clip(cache: _TtsClipCache, phrase: str) -> list[int]:
+    return cache.clip(phrase)
+
+
+def _clip_duration_sec(clip: list[int], rate: int) -> float:
+    return len(clip) / rate if clip else 0.0
+
+
+def _schedule_tts_events(
+    events: list[tuple[float, str]],
+    *,
+    cache: _TtsClipCache,
+    target_rate: int,
+    min_interval: float = TTS_MIN_INTERVAL_SEC,
+    gap: float = TTS_GAP_SEC,
+) -> list[tuple[float, str]]:
+    """Place phrases sequentially: no overlap, min gap, skip near-duplicates."""
+    scheduled: list[tuple[float, str]] = []
+    last_end = 0.0
+    last_phrase = ""
+    last_start = -min_interval
+
+    for t_sec, phrase in sorted(events, key=lambda item: item[0]):
+        p = phrase.strip()
+        if not p:
+            continue
+        if _phrases_similar(p, last_phrase) and t_sec - last_start < min_interval:
+            continue
+
+        clip = _phrase_clip(cache, p)
+        dur = _clip_duration_sec(clip, target_rate)
+        if dur <= 0:
+            continue
+
+        start = max(t_sec, last_end + gap)
+        if scheduled and start - last_start < min_interval:
+            start = last_start + min_interval
+        if start + dur > t_sec + 8.0:
+            continue
+
+        scheduled.append((start, p))
+        last_end = start + dur
+        last_start = start
+        last_phrase = p
+
+    return scheduled
 
 
 def _read_wav_mono(path: Path) -> tuple[int, list[int]]:
@@ -442,23 +558,28 @@ def _build_timeline_wav(
     cache_dir: Path,
     tts_rate: int,
 ) -> Path:
+    clip_cache = _TtsClipCache(cache_dir, tts_rate, rate)
+    scheduled = _schedule_tts_events(events, cache=clip_cache, target_rate=rate)
+    print(
+        f"  [tts] scheduled {len(scheduled)} non-overlapping clips "
+        f"(from {len(events)} raw)",
+        flush=True,
+    )
+    if scheduled:
+        last_start, last_phrase = scheduled[-1]
+        last_clip = _phrase_clip(clip_cache, last_phrase)
+        tail = last_start + _clip_duration_sec(last_clip, rate) + TTS_GAP_SEC
+        duration_sec = max(duration_sec, tail)
     n_samples = max(1, int(duration_sec * rate) + rate)
     timeline = [0] * n_samples
-    for t_sec, phrase in events:
-        wav_path = _tts_wav_path(cache_dir, phrase, tts_rate)
-        clip_rate, clip = _read_wav_mono(wav_path)
-        if clip_rate != rate:
-            ratio = clip_rate / rate
-            clip = [
-                clip[min(len(clip) - 1, int(i * ratio))]
-                for i in range(int(len(clip) / ratio))
-            ]
-        start = int(t_sec * rate)
+    for start_sec, phrase in scheduled:
+        clip = _phrase_clip(clip_cache, phrase)
+        start = int(start_sec * rate)
         for i, sample in enumerate(clip):
             idx = start + i
             if idx >= n_samples:
                 break
-            timeline[idx] = max(-32768, min(32767, timeline[idx] + sample))
+            timeline[idx] = max(-32768, min(32767, sample))
     out_path = cache_dir / "timeline.wav"
     with wave.open(str(out_path), "wb") as wf:
         wf.setnchannels(1)
@@ -531,6 +652,8 @@ def export_live_hud(args: argparse.Namespace) -> int:
     last_phrase = ""
     last_update = 0.0
     tts_events: list[tuple[float, str]] = []
+    tts_last_phrase = ""
+    tts_last_time = -1e9
     phrases_seen: set[str] = set()
     focus_phrases: set[str] = set()
 
@@ -580,9 +703,8 @@ def export_live_hud(args: argparse.Namespace) -> int:
                 phrases_seen.add(ap)
                 if _phrase_is_focus(ap):
                     focus_phrases.add(ap)
-                if args.tts:
-                    tts_events.append((t_sec, ap))
 
+        prev_display = display_phrase
         visible, display_phrase, last_phrase, last_update = _sparse_hud_update(
             phrase,
             speak=speak,
@@ -591,9 +713,16 @@ def export_live_hud(args: argparse.Namespace) -> int:
             last_update=last_update,
             display_phrase=display_phrase,
         )
-        if args.tts and speak and phrase:
-            if not tts_events or tts_events[-1][1] != phrase:
-                tts_events.append((t_sec, phrase))
+
+        if args.tts and speak and visible and display_phrase:
+            phrase_changed = _normalize_phrase(display_phrase) != _normalize_phrase(prev_display)
+            cooldown_ok = t_sec - tts_last_time >= TTS_MIN_INTERVAL_SEC
+            if phrase_changed or (
+                cooldown_ok and not _phrases_similar(display_phrase, tts_last_phrase)
+            ):
+                tts_events.append((t_sec, display_phrase))
+                tts_last_phrase = display_phrase
+                tts_last_time = t_sec
 
         out_frame = draw_sparse_navigation_hud(
             frame,
@@ -624,7 +753,7 @@ def export_live_hud(args: argparse.Namespace) -> int:
     duration_sec = processed / out_fps
     audio_ok = False
     if args.tts and tts_events:
-        print(f"  [tts] {len(tts_events)} speech events, building track...", flush=True)
+        print(f"  [tts] {len(tts_events)} raw speech events, building track...", flush=True)
         with tempfile.TemporaryDirectory() as tmp:
             cache = Path(tmp)
             try:

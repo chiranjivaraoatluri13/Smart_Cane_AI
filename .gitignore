@@ -16,16 +16,6 @@ weights/
 .DS_Store
 Thumbs.db
 
-# IDE / local tooling
-.cursor/
-.kiro/
-.vscode/
-
-# Local-only docs and session artifacts
-pytest_out.txt
-LINKEDIN_POST.md
-PRESENTATION_SCRIPT.md
-*_REPORT.md
 
 # Large / redundant models (use INT8 only in repo)
 segformer_b0_ade20k.onnx

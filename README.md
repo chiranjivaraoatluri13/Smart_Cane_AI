@@ -30,12 +30,23 @@ Not wired yet: UniDepthV2 metric depth, a bundled CARE server.
 
 ## Architecture
 
+**Product path:** develop and validate on a **workstation** (webcam / CLI) → deploy on **smart glasses** (POV camera + hands-free audio). Phone/cloud prototypes in the repo are experimental only.
+
+Visual diagrams (PNG + Mermaid): **[docs/DIAGRAMS.md](docs/DIAGRAMS.md)** · `python scripts/render_diagrams.py`
+
+| Diagram | Preview |
+|---------|---------|
+| Dev workstation context | ![dev context](docs/images/01-system-context.png) |
+| Pipeline | ![pipeline](docs/images/02-pipeline-architecture.png) |
+| Dev → glasses roadmap | ![roadmap](docs/images/03-roadmap-dev-to-glasses.png) |
+| Decision priority | ![decision](docs/images/05-decision-priority.png) |
+
 ```text
 Live Camera Feed
         ↓
 ADE20K SegFormer Semantic Segmentation
         ↓
-Depth (on-device Depth Anything V2 or segmentation proxy)
+Depth (segmentation proxy in dev; wearable metric depth on glasses later)
         ↓
 CARE Navigation / Safety Prediction
         ↓

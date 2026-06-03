@@ -7,7 +7,7 @@ __pycache__/
 *.egg-info/
 .env
 *.pt
-# Keep the ONNX export for cloud deployment — do NOT ignore it.
+# Keep the ONNX export for cloud deployment - do NOT ignore int8 deploy artifacts.
 # *.onnx
 weights/
 # Only ignore the top-level output/ folder (generated files), NOT navigation/output/
@@ -15,3 +15,22 @@ weights/
 *.wav
 .DS_Store
 Thumbs.db
+
+# IDE / local tooling
+.cursor/
+.kiro/
+.vscode/
+
+# Local-only docs and session artifacts
+pytest_out.txt
+LINKEDIN_POST.md
+PRESENTATION_SCRIPT.md
+*_REPORT.md
+
+# Large / redundant models (use INT8 only in repo)
+segformer_b0_ade20k.onnx
+segformer_b0_ade20k.json
+
+# Media (never commit)
+*.mp4
+*.mov

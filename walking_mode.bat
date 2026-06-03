@@ -3,9 +3,9 @@ REM Assistive Navigation - Walking Mode Launcher
 REM Quick launch script for real-world walking navigation
 
 echo.
-echo ╔════════════════════════════════════════════════════════╗
-echo ║    ASSISTIVE NAVIGATION - WALKING MODE LAUNCHER        ║
-echo ╚════════════════════════════════════════════════════════╝
+echo 
+echo     ASSISTIVE NAVIGATION - WALKING MODE LAUNCHER        
+echo 
 echo.
 
 cd /d %~dp0

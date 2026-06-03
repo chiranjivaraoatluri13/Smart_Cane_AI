@@ -5,7 +5,7 @@
 
 ---
 
-## 🚶 Quick Start for Walking
+## Quick Start for Walking
 
 ### **Easiest Way: Use the Launcher**
 
@@ -16,7 +16,7 @@
 
 ---
 
-## 🎒 Equipment Setup
+## Equipment Setup
 
 ### **Minimum Setup:**
 - Laptop with webcam
@@ -37,7 +37,7 @@
 
 ---
 
-## 📱 Walking Modes
+## Walking Modes
 
 ### **Mode 1: Basic Walking** (Start Here)
 
@@ -161,7 +161,7 @@ assistive-nav preview --fast --camera 0
 
 ---
 
-## 🎯 How to Use While Walking
+## How to Use While Walking
 
 ### **Setup Process:**
 
@@ -218,7 +218,7 @@ assistive-nav preview --fast --camera 0
 
 ---
 
-## ⚙️ Configuration for Walking
+## Configuration for Walking
 
 ### **Edit .env for Walking:**
 
@@ -268,7 +268,7 @@ DEST_LON=
 
 ---
 
-## 🗺️ Example Walking Routes
+## Map Example Walking Routes
 
 ### **Example 1: Campus Walk**
 
@@ -299,7 +299,7 @@ assistive-nav run --demo --camera 0
 
 ---
 
-## 📊 What the System Detects
+## What the System Detects
 
 ### **Cityscapes Classes (19 total):**
 
@@ -323,7 +323,7 @@ assistive-nav run --demo --camera 0
 
 ---
 
-## 🎧 Voice Command Meanings
+## Voice Command Meanings
 
 | Command | Meaning | Action |
 |---------|---------|--------|
@@ -335,7 +335,7 @@ assistive-nav run --demo --camera 0
 
 ---
 
-## 🔧 Troubleshooting While Walking
+## Troubleshooting While Walking
 
 ### **Camera Issues:**
 
@@ -404,7 +404,7 @@ TTS_RATE=200  # Faster
 
 ---
 
-## 📍 GPS Integration (Future)
+## GPS Integration (Future)
 
 Currently, the system uses **fixed coordinates** because laptops don't have GPS.
 
@@ -427,7 +427,7 @@ Currently, the system uses **fixed coordinates** because laptops don't have GPS.
 
 ---
 
-## 🎯 Safety Guidelines
+## Safety Guidelines
 
 ### **IMPORTANT: Read Before Walking**
 
@@ -462,7 +462,7 @@ Currently, the system uses **fixed coordinates** because laptops don't have GPS.
 
 ---
 
-## 📝 Session Logging
+## Session Logging
 
 ### **Save Your Walking Session:**
 
@@ -480,7 +480,7 @@ This saves:
 
 ---
 
-## 🚀 Quick Launch (Copy & Paste)
+## Quick Launch (Copy & Paste)
 
 ### **Command Prompt Quick Launch:**
 
@@ -499,7 +499,7 @@ Then select mode from menu.
 
 ---
 
-## 📊 Expected Performance
+## Expected Performance
 
 ### **CPU Mode (Current):**
 - **FPS:** 12-15 frames/second
@@ -515,7 +515,7 @@ Then select mode from menu.
 
 ---
 
-## 🎬 Example Session
+## Example Session
 
 ```bash
 # 1. Navigate to project
@@ -544,7 +544,7 @@ assistive-nav run --demo --camera 0
 
 ---
 
-## 📞 Support
+## Support
 
 If you encounter issues:
 
@@ -555,7 +555,7 @@ If you encounter issues:
 
 ---
 
-**Stay Safe and Enjoy Your Walk!** 🚶‍♂️
+**Stay Safe and Enjoy Your Walk!** 
 
 ---
 

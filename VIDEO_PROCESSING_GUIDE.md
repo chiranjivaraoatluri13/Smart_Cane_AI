@@ -1,12 +1,12 @@
 # Video Processing Guide
 
-## 🎥 Process Pre-Recorded Videos
+## Process Pre-Recorded Videos
 
 The assistive navigation system can now process **pre-recorded videos** to analyze what went wrong during your test.
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### **Method 1: Use the Batch Script** (Easiest)
 
@@ -33,7 +33,7 @@ python process_video.py "C:\Users\chira\Videos\Screen Recordings\Screen Recordin
 
 ---
 
-## 📊 What You'll See
+## What You'll See
 
 ### **Console Output:**
 ```
@@ -89,7 +89,7 @@ Avg walkable ratio: 15.3%
 
 ---
 
-## 🎯 Advanced Usage
+## Advanced Usage
 
 ### **Process Any Video:**
 ```batch
@@ -118,7 +118,7 @@ python process_video.py "video.mp4" --show --use-map ^
 
 ---
 
-## 🔍 Analyzing Your Recording
+## Analyzing Your Recording
 
 The screen recording from today (193552.mp4) will show us:
 
@@ -141,7 +141,7 @@ The screen recording from today (193552.mp4) will show us:
 
 ---
 
-## 📁 Output Files
+## Output Files
 
 When using `--save-dir`, you get:
 
@@ -179,7 +179,7 @@ When using `--save-dir`, you get:
 
 ---
 
-## 🛠️ Troubleshooting
+## Troubleshooting
 
 ### **"Could not open video"**
 - Check the path is correct
@@ -201,7 +201,7 @@ When using `--save-dir`, you get:
 
 ---
 
-## 🎯 Comparing Before/After Fix
+## Comparing Before/After Fix
 
 ### **Test 1: Your Screen Recording (Before Fix)**
 ```batch
@@ -226,23 +226,23 @@ python process_video.py "new_recording.mp4" --show
 
 ---
 
-## 📊 Interpreting Results
+## Interpreting Results
 
 ### **Good Signs:**
-- ✅ go_forward > 60% of frames
-- ✅ walkable_ratio > 0.3 (30%)
-- ✅ obstacle_pixels < 50,000 on clear paths
-- ✅ STOP only when actually needed
+- OK go_forward > 60% of frames
+- OK walkable_ratio > 0.3 (30%)
+- OK obstacle_pixels < 50,000 on clear paths
+- OK STOP only when actually needed
 
 ### **Bad Signs (Broken):**
-- ❌ STOP > 80% of frames
-- ❌ walkable_ratio < 0.2 (20%)
-- ❌ obstacle_pixels > 150,000 constantly
-- ❌ STOP even on empty sidewalks
+- FAIL STOP > 80% of frames
+- FAIL walkable_ratio < 0.2 (20%)
+- FAIL obstacle_pixels > 150,000 constantly
+- FAIL STOP even on empty sidewalks
 
 ---
 
-## 🔬 Detailed Analysis
+## Detailed Analysis
 
 The JSON output includes frame-by-frame data:
 
@@ -259,7 +259,7 @@ print(f"Avg obstacle pixels on STOP: {sum(r['obstacle_pixels'] for r in stop_fra
 
 ---
 
-## 💡 Tips
+## Tips
 
 1. **Start with first 300 frames** (10 seconds) to test quickly
 2. **Use `--show`** to see visual overlay in real-time
@@ -268,7 +268,7 @@ print(f"Avg obstacle pixels on STOP: {sum(r['obstacle_pixels'] for r in stop_fra
 
 ---
 
-## 🚀 Quick Commands Reference
+## Quick Commands Reference
 
 ```batch
 # Your screen recording (analyze today's test)
@@ -289,4 +289,4 @@ python process_video.py "video.mp4" --use-map --current "33.42,-111.93" --dest "
 
 ---
 
-**Run `analyze_recording.bat` to analyze your screen recording now!** 🎬
+**Run `analyze_recording.bat` to analyze your screen recording now!** 

@@ -21,7 +21,7 @@
             width: 100vw;
         }
 
-        /* ── Camera fills the whole background ── */
+        /*  Camera fills the whole background  */
         #video {
             position: fixed;
             top: 0; left: 0;
@@ -30,7 +30,7 @@
             z-index: 0;
         }
 
-        /* ── Full-screen overlay — children opt-in to pointer events ── */
+        /*  Full-screen overlay — children opt-in to pointer events  */
         #overlay {
             position: fixed;
             top: 0; left: 0;
@@ -42,9 +42,9 @@
             align-items: stretch;
         }
 
-        /* ════════════════════════════════════════
+        /* 
            TOP: Search bar
-        ════════════════════════════════════════ */
+         */
         #search-area {
             pointer-events: auto;
             padding: calc(env(safe-area-inset-top, 12px) + 8px) 16px 0;
@@ -210,9 +210,9 @@
             pointer-events: none;
         }
 
-        /* ════════════════════════════════════════
+        /* 
            CENTER: Command display
-        ════════════════════════════════════════ */
+         */
         #command-area {
             flex: 1;
             display: flex;
@@ -242,9 +242,9 @@
             max-width: 320px;
         }
 
-        /* ════════════════════════════════════════
+        /* 
            BOTTOM: Route status + Start/Stop button
-        ════════════════════════════════════════ */
+         */
         #bottom-area {
             pointer-events: none;
             display: flex;
@@ -290,9 +290,9 @@
 
         #start-btn:active, #stop-btn:active { transform: scale(0.95); }
 
-        /* ════════════════════════════════════════
+        /* 
            Connection dot (top-right)
-        ════════════════════════════════════════ */
+         */
         #connection-status {
             position: fixed;
             top: calc(env(safe-area-inset-top, 12px) + 18px);
@@ -308,9 +308,9 @@
 
         #connection-status.connected { background: #34c759; }
 
-        /* ════════════════════════════════════════
+        /* 
            Debug panel (bottom-right, collapsible)
-        ════════════════════════════════════════ */
+         */
         #debug-toggle {
             position: fixed;
             bottom: calc(env(safe-area-inset-bottom, 16px) + 80px);
@@ -348,9 +348,9 @@
 
         .hidden { display: none !important; }
 
-        /* ════════════════════════════════════════
+        /* 
            Map destination picker (Leaflet)
-        ════════════════════════════════════════ */
+         */
         #map-picker {
             position: fixed;
             inset: 0;
@@ -441,7 +441,7 @@
         <div id="search-area">
             <div id="search-row">
                 <div id="search-wrapper">
-                    <div id="search-icon">🔍</div>
+                    <div id="search-icon"></div>
                     <input
                         id="search-input"
                         type="search"
@@ -454,10 +454,10 @@
                         spellcheck="false"
                     >
                 </div>
-                <button id="map-picker-btn" type="button" aria-label="Pick destination on map" title="Pick on map">🗺</button>
+                <button id="map-picker-btn" type="button" aria-label="Pick destination on map" title="Pick on map">Map</button>
             </div>
             <div id="suggestions" role="listbox" aria-label="Place suggestions"></div>
-            <div id="gps-status">📍 Getting your location…</div>
+            <div id="gps-status">Getting your location…</div>
             <div id="search-status" class="suggestion-status"></div>
             <div id="dest-confirm"></div>
         </div>
@@ -480,7 +480,7 @@
     </div>
 
     <!-- Debug panel toggle (outside overlay so it's always tappable) -->
-    <div id="debug-toggle" onclick="toggleDebug()">DBG ▸</div>
+    <div id="debug-toggle" onclick="toggleDebug()">DBG </div>
     <div id="debug">debug log loading…</div>
 
     <!-- Full-screen map picker -->
@@ -489,7 +489,7 @@
         <div id="map-picker-bar">
             <div id="map-picker-label">Tap the map to choose a destination</div>
             <div id="map-picker-actions">
-                <button id="map-locate-btn" type="button" aria-label="Center on my location">📍</button>
+                <button id="map-locate-btn" type="button" aria-label="Center on my location"></button>
                 <button id="map-cancel-btn" type="button">Cancel</button>
                 <button id="map-confirm-btn" type="button" disabled>Set destination</button>
             </div>
@@ -524,10 +524,10 @@
             const btn   = document.getElementById('debug-toggle');
             if (panel.style.display === 'block') {
                 panel.style.display = 'none';
-                btn.textContent = 'DBG ▸';
+                btn.textContent = 'DBG ';
             } else {
                 panel.style.display = 'block';
-                btn.textContent = 'DBG ▾';
+                btn.textContent = 'DBG ';
             }
         }
 
@@ -580,7 +580,7 @@
             return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
         }
 
-        // ── On-device depth (Depth Anything V2 via transformers.js) ──
+        //  On-device depth (Depth Anything V2 via transformers.js) 
         // Depth runs on the phone GPU/NPU in the browser. We compute it on
         // every Nth processed frame and reuse the last value in between so a
         // ~300-700ms inference never blocks the per-frame upload loop. The
@@ -642,12 +642,12 @@
                     ? ` ±${Math.round(lastPosition.accuracy)}m`
                     : '';
                 gpsStatusEl.textContent =
-                    `📍 Location ready${acc} — nearby search enabled`;
+                    `Location ready${acc} — nearby search enabled`;
             } else if (detail) {
                 gpsStatusEl.classList.add('error');
-                gpsStatusEl.textContent = '📍 Location needed — tap here to allow';
+                gpsStatusEl.textContent = 'Location needed — tap here to allow';
             } else {
-                gpsStatusEl.textContent = '📍 Getting your location…';
+                gpsStatusEl.textContent = 'Getting your location…';
             }
         }
 
@@ -795,7 +795,7 @@
 
                 const pin = document.createElement('span');
                 pin.className = 'suggestion-pin';
-                pin.textContent = '📍';
+                pin.textContent = '';
 
                 const label = document.createElement('span');
                 label.className = 'suggestion-label';
@@ -836,7 +836,7 @@
 
             destConfirm.style.display = 'block';
             destConfirm.style.background = 'rgba(0,0,0,0.75)';
-            destConfirm.textContent = '🔍 Finding route…';
+            destConfirm.textContent = 'Finding route…';
 
             const body = new URLSearchParams();
             if (lat != null && lon != null && !Number.isNaN(lat) && !Number.isNaN(lon)) {
@@ -857,19 +857,19 @@
                     destConfirm.style.background = 'rgba(0,140,0,0.88)';
                     const label = address || 'destination';
                     destConfirm.textContent = isRunning
-                        ? '✓ Navigating to ' + label
-                        : '✓ Destination set — tap Start for directions to ' + label;
+                        ? 'OK Navigating to ' + label
+                        : 'OK Destination set — tap Start for directions to ' + label;
                     dbg('destination set:', address, '→', j.lat.toFixed(4) + ',' + j.lon.toFixed(4));
                     setTimeout(() => { destConfirm.style.display = 'none'; }, 4000);
                 } else {
                     destConfirm.style.background = 'rgba(180,0,0,0.88)';
-                    destConfirm.textContent = '✗ Not found: ' + address;
+                    destConfirm.textContent = 'X Not found: ' + address;
                     dbg('destination error:', j.error);
                     setTimeout(() => { destConfirm.style.display = 'none'; }, 4000);
                 }
             } catch (e) {
                 destConfirm.style.background = 'rgba(180,0,0,0.88)';
-                destConfirm.textContent = '✗ Connection error';
+                destConfirm.textContent = 'X Connection error';
                 dbg('destination request failed:', e.message);
                 setTimeout(() => { destConfirm.style.display = 'none'; }, 4000);
             }
@@ -1044,7 +1044,7 @@
                     console.log('Geolocation error:', err.message);
                     updateGpsStatus(false, err.message);
                     if (isRunning) {
-                        detailsDiv.textContent = '⚠ GPS error: ' + err.message;
+                        detailsDiv.textContent = 'Warning: GPS error: ' + err.message;
                     }
                 },
                 { enableHighAccuracy: true, maximumAge: 500, timeout: 10000 }
@@ -1246,7 +1246,7 @@
                 return;
             }
 
-            // ── Capture at CAPTURE_W×CAPTURE_H — matches server inference size ──
+            //  Capture at CAPTURE_W×CAPTURE_H — matches server inference size 
             try {
                 captureCtx.drawImage(video, 0, 0, CAPTURE_W, CAPTURE_H);
             } catch (e) {
@@ -1290,47 +1290,47 @@
                     const result = await response.json();
                     const rtt = Date.now() - t0;
 
-                    // ── Command text (skip stale snapshots if we already showed fresher) ──
+                    //  Command text (skip stale snapshots if we already showed fresher) 
                     if (!result.stale || result.phrase !== lastPhrase) {
                         commandDiv.textContent = result.phrase;
                         lastPhrase = result.phrase;
                     }
 
-                    // ── Details / route cue ──
+                    //  Details / route cue 
                     let detailText = result.rationale || '';
                     const rs = result.route_status;
                     if (result.facts && result.facts.route_cue) {
                         const rc   = result.facts.route_cue;
                         if (rc.turn === 'loading') {
-                            detailText = '⏳ Loading walking route…';
+                            detailText = '... Loading walking route…';
                         } else if (rc.turn === 'failed') {
-                            detailText = '✗ Walking route unavailable — check connection or set destination again';
+                            detailText = 'X Walking route unavailable — check connection or set destination again';
                         } else {
                             const feet = Math.round((rc.meters_to_turn || 0) * 3.281);
                             if (rc.turn === 'stop') {
-                                detailText = '📍 Destination in ' + feet + ' ft';
+                                detailText = 'Destination in ' + feet + ' ft';
                             } else if (rc.turn === 'left') {
-                                detailText = '↰ Turn left in ' + feet + ' ft';
+                                detailText = 'Turn left in ' + feet + ' ft';
                             } else if (rc.turn === 'right') {
-                                detailText = '↱ Turn right in ' + feet + ' ft';
+                                detailText = 'Turn right in ' + feet + ' ft';
                             } else if (rc.turn === 'forward') {
-                                detailText = '↑ Continue ' + feet + ' ft';
+                                detailText = 'Continue ' + feet + ' ft';
                             }
                         }
                     } else if (rs && rs.destination_set) {
                         if (rs.loading) {
-                            detailText = '⏳ Loading walking route…';
+                            detailText = '... Loading walking route…';
                         } else if (rs.failed) {
-                            detailText = '✗ Walking route unavailable — check connection or set destination again';
+                            detailText = 'X Walking route unavailable — check connection or set destination again';
                         } else if (!rs.active) {
-                            detailText = '⏳ Waiting for walking route…';
+                            detailText = '... Waiting for walking route…';
                         }
                     }
                     if (lastPosition.lat == null) {
-                        detailText = '⚠ No GPS — allow location for turn-by-turn directions';
+                        detailText = 'Warning: No GPS — allow location for turn-by-turn directions';
                     } else if (lastHeading == null && detailText.indexOf('Loading') === -1 && detailText.indexOf('Waiting') === -1) {
                         detailText = (detailText ? detailText + ' · ' : '') +
-                            '⚠ Walk a few steps so heading can be detected';
+                            'Warning: Walk a few steps so heading can be detected';
                     }
                     const latencyBits = [
                         `rtt ${rtt}ms`,
@@ -1343,7 +1343,7 @@
                         ? detailText + ' · ' + latencyBits
                         : latencyBits;
 
-                    // ── Route status strip ──
+                    //  Route status strip 
                     if ((result.facts && result.facts.route_cue) || (rs && rs.destination_set)) {
                         routeStatus.textContent = detailText;
                         routeStatus.style.display = 'block';
@@ -1351,7 +1351,7 @@
                         routeStatus.style.display = 'none';
                     }
 
-                    // ── Speech ──
+                    //  Speech 
                     const wantsToSpeak =
                         (synth && Array.isArray(result.alerts) && result.alerts.length > 0) ||
                         (synth && result.speak);

@@ -5,9 +5,9 @@ cd /d %~dp0
 call .venv\Scripts\activate.bat
 
 echo.
-echo ═══════════════════════════════════════════════════════════
+echo 
 echo   ASSISTIVE NAVIGATION - CAMERA DIAGNOSTIC
-echo ═══════════════════════════════════════════════════════════
+echo 
 echo.
 echo This will show you what the camera sees and detects.
 echo.

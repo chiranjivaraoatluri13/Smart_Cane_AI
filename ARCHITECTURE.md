@@ -1,147 +1,147 @@
-# 🏗️ Smart Cane AI - Complete Architecture
+# Smart Cane AI - Complete Architecture
 
 ## System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     PHONE CLIENT (Web UI)                       │
-│  - Camera capture (real-time video stream)                      │
-│  - GPS + Compass (position & heading)                           │
-│  - Depth sensor (optional: Depth Anything V2)                   │
-│  - Web Speech API (text-to-speech output)                       │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ HTTP POST /process_frame
-                         │ (JPEG + GPS + heading + depth_m)
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              CLOUD SERVER (Render / Railway)                    │
-│                  phone_server_cloud.py                          │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              PERCEPTION LAYER                            │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ Segmentation (ADE20K SegFormer-B0 ONNX INT8)       │ │  │
-│  │  │ - Input: dynamic NxN RGB (INFERENCE_IMGSZ, 256 prod)│ │  │
-│  │  │ - Output: 150-class semantic map                   │ │  │
-│  │  │ - Latency: ~94ms @256 (~50ms model on cloud CPU)   │ │  │
-│  │  │ - Classes: walkable, obstacles, hazards            │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  │                                                           │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ Depth Estimation (Segmentation Proxy)              │ │  │
-│  │  │ - Input: class map + frame                         │ │  │
-│  │  │ - Output: obstacle distance (0.5-10m)             │ │  │
-│  │  │ - Latency: ~28ms                                   │ │  │
-│  │  │ - Method: vertical position + ratio fallback       │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  │                                                           │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ Stairs Detection (Edge Density Heuristic)          │ │  │
-│  │  │ - Input: class map                                 │ │  │
-│  │  │ - Output: stairs/curb detected (bool)              │ │  │
-│  │  │ - Latency: ~15ms (disabled on cloud)               │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              REASONING LAYER                             │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ CARE Navigator (Safety Assessment)                 │ │  │
-│  │  │ - Input: segmentation + depth                      │ │  │
-│  │  │ - Output: hazard_detected, safety_score, direction │ │  │
-│  │  │ - Latency: <1ms                                    │ │  │
-│  │  │ - Logic: obstacle ratio vs frame area              │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  │                                                           │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ Spatial Reasoner (Decision Making)                 │ │  │
-│  │  │ - Input: seg, depth, CARE, route_cue, stairs      │ │  │
-│  │  │ - Output: NavigationCommand + confidence           │ │  │
-│  │  │ - Latency: ~5ms                                    │ │  │
-│  │  │ - Logic:                                           │ │  │
-│  │  │   1. Vision STOP (hazard detected)                 │ │  │
-│  │  │   2. Route guidance (map turn)                     │ │  │
-│  │  │   3. Per-side walkable analysis                    │ │  │
-│  │  │   4. CARE direction fallback                       │ │  │
-│  │  │   5. Confidence threshold enforcement (< 0.75)     │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  │                                                           │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ Trend Tracker (Approach Detection)                 │ │  │
-│  │  │ - Input: per-side class pixels                     │ │  │
-│  │  │ - Output: approaching/receding/static              │ │  │
-│  │  │ - Latency: <1ms                                    │ │  │
-│  │  │ - Logic: frame-to-frame pixel growth               │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  │                                                           │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ Alert Tracker (Proximity Warnings)                 │ │  │
-│  │  │ - Input: per-side hazards + trends                 │ │  │
-│  │  │ - Output: "Car approaching" alerts                 │ │  │
-│  │  │ - Latency: ~9ms (disabled on cloud)                │ │  │
-│  │  │ - Logic: category + growth rate + cooldown         │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  │                                                           │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ Map Guidance (Route Navigation)                    │ │  │
-│  │  │ - Input: GPS position + heading + destination      │ │  │
-│  │  │ - Output: turn direction + distance                │ │  │
-│  │  │ - Latency: <1ms (cached)                           │ │  │
-│  │  │ - Backend: OSRM (OpenStreetMap Routing)            │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              OUTPUT LAYER                                │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ Phrase Composer (Natural Language)                 │ │  │
-│  │  │ - Input: GuidanceFacts (command, hazards, etc)     │ │  │
-│  │  │ - Output: Human-readable phrase                    │ │  │
-│  │  │ - Latency: <1ms                                    │ │  │
-│  │  │ - Examples:                                        │ │  │
-│  │  │   "Stop, person on your right"                     │ │  │
-│  │  │   "Take a left, path is clear"                     │ │  │
-│  │  │   "Slow down, car approaching"                     │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  │                                                           │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ Command Validator (Anti-Spam)                      │ │  │
-│  │  │ - Input: NavigationDecision                        │ │  │
-│  │  │ - Output: speak (bool) + cooldown tracking         │ │  │
-│  │  │ - Latency: <1ms                                    │ │  │
-│  │  │ - Logic:                                           │ │  │
-│  │  │   1. Dwell filter (hold 2 frames before speaking)  │ │  │
-│  │  │   2. Cooldown (8s between same command)            │ │  │
-│  │  │   3. Min gap (2s between any utterances)           │ │  │
-│  │  │   4. STOP bypasses dwell (safety first)            │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  │                                                           │  │
-│  │  ┌─────────────────────────────────────────────────────┐ │  │
-│  │  │ Text-to-Speech (TTS)                               │ │  │
-│  │  │ - Input: phrase string                             │ │  │
-│  │  │ - Output: audio (phone-side via Web Speech API)    │ │  │
-│  │  │ - Latency: <1ms (server-side)                      │ │  │
-│  │  │ - Backend: pyttsx3 (laptop) or Web Speech (phone)  │ │  │
-│  │  └─────────────────────────────────────────────────────┘ │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              PIPELINE ORCHESTRATION                       │  │
-│  │  process_frame() - Main entry point                      │  │
-│  │  - Coordinates all perception → reasoning → output       │  │
-│  │  - Handles frame skipping (PROCESS_EVERY_N_FRAMES=10)   │  │
-│  │  - Returns JSON with command + phrase + confidence       │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                         │ HTTP JSON response
-                         │ {command, confidence, phrase, speak}
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     PHONE CLIENT (Web UI)                       │
-│  - Display command on screen                                    │
-│  - Speak phrase via Web Speech API                              │
-│  - Log to console for debugging                                 │
-└─────────────────────────────────────────────────────────────────┘
+
+                     PHONE CLIENT (Web UI)                       
+  - Camera capture (real-time video stream)                      
+  - GPS + Compass (position & heading)                           
+  - Depth sensor (optional: Depth Anything V2)                   
+  - Web Speech API (text-to-speech output)                       
+
+                          HTTP POST /process_frame
+                          (JPEG + GPS + heading + depth_m)
+                         
+
+              CLOUD SERVER (Render / Railway)                    
+                  phone_server_cloud.py                          
+                                                                 
+    
+                PERCEPTION LAYER                              
+       
+     Segmentation (ADE20K SegFormer-B0 ONNX INT8)          
+     - Input: dynamic NxN RGB (INFERENCE_IMGSZ, 256 prod)   
+     - Output: 150-class semantic map                      
+     - Latency: ~94ms @256 (~50ms model on cloud CPU)      
+     - Classes: walkable, obstacles, hazards               
+       
+                                                               
+       
+     Depth Estimation (Segmentation Proxy)                 
+     - Input: class map + frame                            
+     - Output: obstacle distance (0.5-10m)                
+     - Latency: ~28ms                                      
+     - Method: vertical position + ratio fallback          
+       
+                                                               
+       
+     Stairs Detection (Edge Density Heuristic)             
+     - Input: class map                                    
+     - Output: stairs/curb detected (bool)                 
+     - Latency: ~15ms (disabled on cloud)                  
+       
+    
+                                                                 
+    
+                REASONING LAYER                               
+       
+     CARE Navigator (Safety Assessment)                    
+     - Input: segmentation + depth                         
+     - Output: hazard_detected, safety_score, direction    
+     - Latency: <1ms                                       
+     - Logic: obstacle ratio vs frame area                 
+       
+                                                               
+       
+     Spatial Reasoner (Decision Making)                    
+     - Input: seg, depth, CARE, route_cue, stairs         
+     - Output: NavigationCommand + confidence              
+     - Latency: ~5ms                                       
+     - Logic:                                              
+       1. Vision STOP (hazard detected)                    
+       2. Route guidance (map turn)                        
+       3. Per-side walkable analysis                       
+       4. CARE direction fallback                          
+       5. Confidence threshold enforcement (< 0.75)        
+       
+                                                               
+       
+     Trend Tracker (Approach Detection)                    
+     - Input: per-side class pixels                        
+     - Output: approaching/receding/static                 
+     - Latency: <1ms                                       
+     - Logic: frame-to-frame pixel growth                  
+       
+                                                               
+       
+     Alert Tracker (Proximity Warnings)                    
+     - Input: per-side hazards + trends                    
+     - Output: "Car approaching" alerts                    
+     - Latency: ~9ms (disabled on cloud)                   
+     - Logic: category + growth rate + cooldown            
+       
+                                                               
+       
+     Map Guidance (Route Navigation)                       
+     - Input: GPS position + heading + destination         
+     - Output: turn direction + distance                   
+     - Latency: <1ms (cached)                              
+     - Backend: OSRM (OpenStreetMap Routing)               
+       
+    
+                                                                 
+    
+                OUTPUT LAYER                                  
+       
+     Phrase Composer (Natural Language)                    
+     - Input: GuidanceFacts (command, hazards, etc)        
+     - Output: Human-readable phrase                       
+     - Latency: <1ms                                       
+     - Examples:                                           
+       "Stop, person on your right"                        
+       "Take a left, path is clear"                        
+       "Slow down, car approaching"                        
+       
+                                                               
+       
+     Command Validator (Anti-Spam)                         
+     - Input: NavigationDecision                           
+     - Output: speak (bool) + cooldown tracking            
+     - Latency: <1ms                                       
+     - Logic:                                              
+       1. Dwell filter (hold 2 frames before speaking)     
+       2. Cooldown (8s between same command)               
+       3. Min gap (2s between any utterances)              
+       4. STOP bypasses dwell (safety first)               
+       
+                                                               
+       
+     Text-to-Speech (TTS)                                  
+     - Input: phrase string                                
+     - Output: audio (phone-side via Web Speech API)       
+     - Latency: <1ms (server-side)                         
+     - Backend: pyttsx3 (laptop) or Web Speech (phone)     
+       
+    
+                                                                 
+    
+                PIPELINE ORCHESTRATION                         
+    process_frame() - Main entry point                        
+    - Coordinates all perception → reasoning → output         
+    - Handles frame skipping (PROCESS_EVERY_N_FRAMES=10)     
+    - Returns JSON with command + phrase + confidence         
+    
+
+                          HTTP JSON response
+                          {command, confidence, phrase, speak}
+                         
+
+                     PHONE CLIENT (Web UI)                       
+  - Display command on screen                                    
+  - Speak phrase via Web Speech API                              
+  - Log to console for debugging                                 
+
 ```
 
 ---
@@ -396,9 +396,9 @@ Reasoning + composer:    ~3ms
 
 | Model | Size | Latency | Backend | Status |
 |-------|------|---------|---------|--------|
-| SegFormer-B0 ONNX INT8 | 13MB | 230ms | onnxruntime | ✅ Active |
+| SegFormer-B0 ONNX INT8 | 13MB | 230ms | onnxruntime | OK Active |
 | SegFormer-B0 PyTorch | 50MB | 350ms | transformers | Fallback |
-| OSRM Routing | N/A | <1ms | HTTP API | ✅ Active |
+| OSRM Routing | N/A | <1ms | HTTP API | OK Active |
 
 ---
 
@@ -408,20 +408,20 @@ Reasoning + composer:    ~3ms
 
 | Category | Tests | Status |
 |----------|-------|--------|
-| Segmentation | 9 | ✅ |
-| Depth | 6 | ✅ |
-| CARE | 2 | ✅ |
-| Spatial Reasoner | 9 | ✅ |
-| Composer | 12 | ✅ |
-| Alerts | 13 | ✅ |
-| Validator | 11 | ✅ |
-| Voice Queue | 9 | ✅ |
-| Trend | 14 | ✅ |
-| Distance | 11 | ✅ |
-| Maps | 7 | ✅ |
-| Phone Server | 12 | ✅ |
-| Stairs | 8 | ✅ |
-| Other | 77 | ✅ |
+| Segmentation | 9 | OK |
+| Depth | 6 | OK |
+| CARE | 2 | OK |
+| Spatial Reasoner | 9 | OK |
+| Composer | 12 | OK |
+| Alerts | 13 | OK |
+| Validator | 11 | OK |
+| Voice Queue | 9 | OK |
+| Trend | 14 | OK |
+| Distance | 11 | OK |
+| Maps | 7 | OK |
+| Phone Server | 12 | OK |
+| Stairs | 8 | OK |
+| Other | 77 | OK |
 
 ---
 
@@ -449,11 +449,11 @@ Reasoning + composer:    ~3ms
 ## Summary
 
 **Current State:**
-- ✅ Full pipeline implemented (perception → reasoning → output)
-- ✅ 307 tests passing
-- ✅ Deployed to Render
-- ✅ Phone client functional
-- ⚠️ Latency: 334ms (needs optimization)
+- OK Full pipeline implemented (perception → reasoning → output)
+- OK 307 tests passing
+- OK Deployed to Render
+- OK Phone client functional
+- Warning: Latency: 334ms (needs optimization)
 
 **Next Priority:**
 1. Implement frame skipping (10) → 33ms

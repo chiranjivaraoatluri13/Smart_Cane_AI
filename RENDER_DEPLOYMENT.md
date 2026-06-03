@@ -63,9 +63,9 @@ https://smart-cane-ai.onrender.com
 ### 2. Allow Permissions
 
 When prompted:
-- ✅ Allow **Camera** access
-- ✅ Allow **Location** (GPS) access
-- ✅ Allow **Microphone** (for Web Speech API)
+- OK Allow **Camera** access
+- OK Allow **Location** (GPS) access
+- OK Allow **Microphone** (for Web Speech API)
 
 ### 3. Set Destination
 
@@ -91,26 +91,26 @@ When prompted:
 ```
 Phone (Browser)
     ↓
-    ├─ Camera → JPEG frames
-    ├─ GPS → lat, lon, heading
-    └─ Depth Anything V2 → depth_m (on-device)
+     Camera → JPEG frames
+     GPS → lat, lon, heading
+     Depth Anything V2 → depth_m (on-device)
     ↓
 Render Server (phone_server_cloud.py)
     ↓
-    ├─ ADE20K SegFormer (ONNX, INT8)
-    ├─ Depth proxy (fallback)
-    ├─ CARE safety reasoning
-    ├─ Spatial reasoner (per-side analysis)
-    ├─ Map guidance (OSRM routing)
-    ├─ Phrase composer
-    └─ Alert tracker
+     ADE20K SegFormer (ONNX, INT8)
+     Depth proxy (fallback)
+     CARE safety reasoning
+     Spatial reasoner (per-side analysis)
+     Map guidance (OSRM routing)
+     Phrase composer
+     Alert tracker
     ↓
 Response JSON
-    ├─ command: "go_forward" | "move_left" | "move_right" | "slow_down" | "stop"
-    ├─ phrase: Natural language guidance
-    ├─ speak: true/false (whether to speak)
-    ├─ facts: Detailed reasoning (walkable_by_side, hazards, etc.)
-    └─ alerts: Proximity alerts ("car approaching", etc.)
+     command: "go_forward" | "move_left" | "move_right" | "slow_down" | "stop"
+     phrase: Natural language guidance
+     speak: true/false (whether to speak)
+     facts: Detailed reasoning (walkable_by_side, hazards, etc.)
+     alerts: Proximity alerts ("car approaching", etc.)
     ↓
 Phone (Web Speech API)
     ↓
@@ -330,11 +330,11 @@ address: "Empire State Building, New York"
 
 ## Next Steps
 
-1. ✅ Push code to GitHub
-2. ✅ Deploy to Render
-3. ✅ Test with phone client
-4. ✅ Adjust environment variables based on performance
-5. ✅ Monitor logs and metrics
+1. OK Push code to GitHub
+2. OK Deploy to Render
+3. OK Test with phone client
+4. OK Adjust environment variables based on performance
+5. OK Monitor logs and metrics
 
 ---
 
@@ -348,4 +348,4 @@ For issues:
 
 ---
 
-**Status:** Ready for production phone-only deployment ✅
+**Status:** Ready for production phone-only deployment OK

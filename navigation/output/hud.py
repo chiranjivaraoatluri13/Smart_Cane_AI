@@ -20,11 +20,11 @@ _COMMAND_COLORS_BGR: dict[str, tuple[int, int, int]] = {
 }
 
 _ARROW: dict[str, str] = {
-    NavigationCommand.STOP.value: "■ STOP",
-    NavigationCommand.SLOW_DOWN.value: "▼ SLOW",
-    NavigationCommand.GO_FORWARD.value: "▲ FORWARD",
-    NavigationCommand.MOVE_LEFT.value: "◀ LEFT",
-    NavigationCommand.MOVE_RIGHT.value: "▶ RIGHT",
+    NavigationCommand.STOP.value: "STOP",
+    NavigationCommand.SLOW_DOWN.value: "SLOW",
+    NavigationCommand.GO_FORWARD.value: "FORWARD",
+    NavigationCommand.MOVE_LEFT.value: "LEFT",
+    NavigationCommand.MOVE_RIGHT.value: "RIGHT",
 }
 
 # phone_client.html — #command / #details / #route-status
@@ -97,19 +97,19 @@ def build_live_detail_text(
         meters = float(rc.get("meters_to_turn") or 0.0)
         feet = int(round(meters * 3.281))
         if turn == "loading":
-            detail_text = "⏳ Loading walking route…"
+            detail_text = "... Loading walking route…"
         elif turn == "failed":
             detail_text = (
-                "✗ Walking route unavailable — check connection or set destination again"
+                "X Walking route unavailable — check connection or set destination again"
             )
         elif turn == "stop":
-            detail_text = f"📍 Destination in {feet} ft"
+            detail_text = f"Destination in {feet} ft"
         elif turn == "left":
-            detail_text = f"↰ Turn left in {feet} ft"
+            detail_text = f"Turn left in {feet} ft"
         elif turn == "right":
-            detail_text = f"↱ Turn right in {feet} ft"
+            detail_text = f"Turn right in {feet} ft"
         elif turn == "forward":
-            detail_text = f"↑ Continue {feet} ft"
+            detail_text = f"Continue {feet} ft"
         route_status = detail_text
     return detail_text, route_status
 

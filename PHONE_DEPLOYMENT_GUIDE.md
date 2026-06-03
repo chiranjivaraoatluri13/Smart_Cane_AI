@@ -1,25 +1,25 @@
-# 📱 Running Assistive Navigation on Your Phone
+# Running Assistive Navigation on Your Phone
 
-## ✅ YES! You Can Run It on Your Phone
+## OK YES! You Can Run It on Your Phone
 
 There are **3 main approaches** to run the assistive navigation system on your phone:
 
 ---
 
-## 🎯 **Recommended Approaches**
+## **Recommended Approaches**
 
-### **Option 1: Termux + Python** ⭐ (Best for Android)
+### **Option 1: Termux + Python** * (Best for Android)
 Run the full Python system natively on Android using Termux.
 
-### **Option 2: Client-Server Architecture** 🌐 (Easiest)
+### **Option 2: Client-Server Architecture**  (Easiest)
 Phone captures video → sends to laptop → laptop processes → sends commands back
 
-### **Option 3: Android App (Java/Kotlin)** 📱 (Most Native)
+### **Option 3: Android App (Java/Kotlin)**  (Most Native)
 Build a native Android app using TensorFlow Lite or ONNX
 
 ---
 
-## 🧭 On-device depth (Depth Anything V2 in the browser)
+## On-device depth (Depth Anything V2 in the browser)
 
 The client-server build (Option 2) now runs a **real monocular depth network on
 the phone itself**, in the browser, instead of the server's geometric depth
@@ -58,22 +58,22 @@ block of `phone_client.html`:
 
 ---
 
-# 📱 **OPTION 1: Termux + Python (Android)**
+# **OPTION 1: Termux + Python (Android)**
 
-## ✅ **Advantages:**
+## OK **Advantages:**
 - Full Python environment on Android
 - No laptop needed (completely standalone)
 - Use phone camera directly
 - Real-time TTS output
 
-## ⚠️ **Challenges:**
+## Warning: **Challenges:**
 - PyTorch on Android (large, slow)
 - Limited by phone CPU/GPU
 - Complex setup
 
 ---
 
-## 🚀 **Setup Guide - Termux**
+## **Setup Guide - Termux**
 
 ### **Step 1: Install Termux**
 Download from F-Droid (NOT Google Play - outdated):
@@ -147,7 +147,7 @@ python -m navigation.cli run --camera 0
 
 ---
 
-## ⚠️ **Termux Challenges:**
+## Warning: **Termux Challenges:**
 
 1. **PyTorch is HUGE** (~500MB) and slow on phone CPU
 2. **Camera access** may need Termux:API addon
@@ -156,18 +156,18 @@ python -m navigation.cli run --camera 0
 
 ---
 
-# 🌐 **OPTION 2: Client-Server (Recommended!)**
+# **OPTION 2: Client-Server (Recommended!)**
 
 This is the **EASIEST** and **BEST PERFORMANCE** approach!
 
-## ✅ **How It Works:**
+## OK **How It Works:**
 1. Phone app captures video frames
 2. Sends frames to laptop server via WiFi
 3. Laptop processes with YOLO (fast!)
 4. Sends back commands ("GO FORWARD", "STOP")
 5. Phone speaks commands via TTS
 
-## 🚀 **Setup Guide**
+## **Setup Guide**
 
 ### **Part A: Laptop Server**
 
@@ -363,11 +363,11 @@ Would you like me to create a full Android app? This requires more setup but pro
 
 ---
 
-# 📱 **OPTION 3: TensorFlow Lite / ONNX (Native Android)**
+# **OPTION 3: TensorFlow Lite / ONNX (Native Android)**
 
 Convert YOLO model to TensorFlow Lite or ONNX format for mobile deployment.
 
-## 🔧 **Steps:**
+## **Steps:**
 
 1. **Export YOLO to TFLite:**
 ```python
@@ -385,19 +385,19 @@ This is most complex but best performance.
 
 ---
 
-# 🎯 **Recommendation: Client-Server (Option 2)**
+# **Recommendation: Client-Server (Option 2)**
 
 **Best approach for you:**
 
-✅ **Keep laptop processing** (fast YOLO inference)  
-✅ **Phone as camera + display** (simple)  
-✅ **WiFi connection** (no cables)  
-✅ **Easy to implement** (HTML5 web app)  
-✅ **Good performance** (~3-5 FPS)
+OK **Keep laptop processing** (fast YOLO inference)  
+OK **Phone as camera + display** (simple)  
+OK **WiFi connection** (no cables)  
+OK **Easy to implement** (HTML5 web app)  
+OK **Good performance** (~3-5 FPS)
 
 ---
 
-# 🚀 **Next Steps - Which Option?**
+# **Next Steps - Which Option?**
 
 1. **Quick test:** Option 2 (Client-Server) - I'll create the server now
 2. **Full Android:** Option 1 (Termux) - More setup, standalone
@@ -406,9 +406,9 @@ This is most complex but best performance.
 **Which approach would you like me to implement?**
 
 I can create:
-- ✅ Flask server for laptop (5 minutes)
-- ✅ HTML5 phone client (5 minutes)
-- ✅ Native Android app (1-2 hours)
-- ✅ Termux setup script (30 minutes)
+- OK Flask server for laptop (5 minutes)
+- OK HTML5 phone client (5 minutes)
+- OK Native Android app (1-2 hours)
+- OK Termux setup script (30 minutes)
 
-**Let me know and I'll build it!** 📱
+**Let me know and I'll build it!** 

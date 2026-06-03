@@ -348,17 +348,17 @@ When using `--seg-save-dir output/`:
 
 ```
 output/
-├── seg_000000.jpg    # Frame 0
-├── seg_000001.jpg    # Frame 1
-├── seg_000002.jpg    # Frame 2
-└── ...
+ seg_000000.jpg    # Frame 0
+ seg_000001.jpg    # Frame 1
+ seg_000002.jpg    # Frame 2
+ ...
 ```
 
 When using `--use-map`:
 
 ```
 output/
-└── route.json        # OSRM route data
+ route.json        # OSRM route data
 ```
 
 ---

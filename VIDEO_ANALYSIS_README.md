@@ -1,6 +1,6 @@
-# 🎥 YES! Process Your Screen Recording
+# YES! Process Your Screen Recording
 
-## ✅ One Command to Analyze Your Video
+## OK One Command to Analyze Your Video
 
 ```batch
 C:\Users\chira\Projects\assistive-navigation\ANALYZE_NOW.bat
@@ -10,7 +10,7 @@ C:\Users\chira\Projects\assistive-navigation\ANALYZE_NOW.bat
 
 ---
 
-## 📹 What This Does
+## What This Does
 
 Your screen recording from today:
 - **File:** `C:\Users\chira\Videos\Screen Recordings\Screen Recording 2026-05-25 193552.mp4`
@@ -18,15 +18,15 @@ Your screen recording from today:
 - **Recorded:** Today at 7:35 PM
 
 The script will:
-1. ✅ Process every frame through the navigation system
-2. ✅ Show what YOLO detected (buildings, sidewalks, obstacles)
-3. ✅ Display what commands were issued (STOP, go_forward, etc.)
-4. ✅ Save annotated frames to `output/video_analysis/`
-5. ✅ Generate detailed statistics in `analysis_summary.json`
+1. OK Process every frame through the navigation system
+2. OK Show what YOLO detected (buildings, sidewalks, obstacles)
+3. OK Display what commands were issued (STOP, go_forward, etc.)
+4. OK Save annotated frames to `output/video_analysis/`
+5. OK Generate detailed statistics in `analysis_summary.json`
 
 ---
 
-## 📊 What You'll See
+## What You'll See
 
 ### **While Processing:**
 ```
@@ -58,23 +58,23 @@ Avg walkable ratio: 15.3%          ← Low = not enough walkable area
 
 ---
 
-## 🔍 What to Look For
+## What to Look For
 
 ### **Before Fix (Your Recording):**
-- ❌ **STOP dominates** (80-90% of commands)
-- ❌ **High obstacle pixels** (>150,000)
-- ❌ **Low walkable ratio** (<20%)
-- ❌ **Buildings shown as red/orange** (detected as obstacles)
+- FAIL **STOP dominates** (80-90% of commands)
+- FAIL **High obstacle pixels** (>150,000)
+- FAIL **Low walkable ratio** (<20%)
+- FAIL **Buildings shown as red/orange** (detected as obstacles)
 
 ### **After Fix (Expected):**
-- ✅ **go_forward dominates** (60-80% of commands)
-- ✅ **Lower obstacle pixels** (<50,000)
-- ✅ **Higher walkable ratio** (>30%)
-- ✅ **Buildings shown as gray** (ignored)
+- OK **go_forward dominates** (60-80% of commands)
+- OK **Lower obstacle pixels** (<50,000)
+- OK **Higher walkable ratio** (>30%)
+- OK **Buildings shown as gray** (ignored)
 
 ---
 
-## 📁 Output Files
+## Output Files
 
 After processing, check:
 
@@ -102,7 +102,7 @@ notepad output\video_analysis\analysis_summary.json
 
 ---
 
-## 🚀 Alternative Commands
+## Alternative Commands
 
 ### **Quick Test (First 10 Seconds Only):**
 ```batch
@@ -123,7 +123,7 @@ python process_video.py "path\to\your\video.mp4" --show
 
 ---
 
-## 🎯 Diagnosing the Voice Issue
+## Diagnosing the Voice Issue
 
 The video analysis will reveal:
 
@@ -149,7 +149,7 @@ If `speak: true` but no audio → TTS issue
 
 ---
 
-## 🛠️ Troubleshooting
+## Troubleshooting
 
 ### **"Could not open video"**
 - Check file path in `ANALYZE_NOW.bat`
@@ -172,7 +172,7 @@ If `speak: true` but no audio → TTS issue
 
 ---
 
-## 📊 Expected Processing Time
+## Expected Processing Time
 
 | Frames | Duration | Time to Process |
 |--------|----------|-----------------|
@@ -185,7 +185,7 @@ If `speak: true` but no audio → TTS issue
 
 ---
 
-## 🎬 Step-by-Step Guide
+## Step-by-Step Guide
 
 ### **Step 1: Run Analysis**
 ```batch
@@ -220,7 +220,7 @@ Look for:
 
 ---
 
-## 💡 Pro Tips
+## Pro Tips
 
 1. **Test with first 300 frames** to save time
 2. **Keep the visualization window open** to see detections
@@ -230,7 +230,7 @@ Look for:
 
 ---
 
-## 🚀 Quick Commands Summary
+## Quick Commands Summary
 
 ```batch
 # ONE-CLICK ANALYSIS
@@ -248,7 +248,7 @@ python process_video.py "C:\Users\chira\Videos\Screen Recordings\Screen Recordin
 
 ---
 
-## 📝 Next Steps
+## Next Steps
 
 1. **Run ANALYZE_NOW.bat**
 2. **Wait for processing** (2-60 minutes depending on frames)
@@ -256,10 +256,10 @@ python process_video.py "C:\Users\chira\Videos\Screen Recordings\Screen Recordin
 4. **Share the results** with me (command distribution, avg obstacle pixels)
 
 Then we can:
-- ✅ Confirm the bug (if STOP > 80%)
-- ✅ Verify the fix worked
-- ✅ Debug voice issue (if separate from obstacle detection)
+- OK Confirm the bug (if STOP > 80%)
+- OK Verify the fix worked
+- OK Debug voice issue (if separate from obstacle detection)
 
 ---
 
-**Double-click `ANALYZE_NOW.bat` to start!** 🎬
+**Double-click `ANALYZE_NOW.bat` to start!** 

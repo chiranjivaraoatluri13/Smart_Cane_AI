@@ -1,6 +1,6 @@
-# 📋 Render Deployment Checklist
+# Render Deployment Checklist
 
-## Pre-Deployment ✅
+## Pre-Deployment OK
 
 - [x] Code migrated from YOLO to ADE20K SegFormer
 - [x] All 307 tests passing
@@ -223,7 +223,7 @@ If deployment has issues:
 
 ## Success Criteria
 
-✅ **Deployment Successful When:**
+OK **Deployment Successful When:**
 - [ ] Service is running on Render
 - [ ] Health endpoint returns 200 OK
 - [ ] Phone client loads without errors
@@ -252,6 +252,6 @@ If deployment has issues:
 
 ---
 
-**Status:** Ready for deployment ✅  
+**Status:** Ready for deployment OK  
 **Last Updated:** May 31, 2026  
 **Target:** Render (phone-only)

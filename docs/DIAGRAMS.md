@@ -8,20 +8,17 @@ python scripts/render_diagrams.py
 
 | Diagram | File |
 |---------|------|
-| Phone, server, and speech | [images/01-system-context.png](images/01-system-context.png) |
+| Glasses and spoken guidance | [images/01-system-context.png](images/01-system-context.png) |
 | Frame pipeline | [images/02-pipeline-architecture.png](images/02-pipeline-architecture.png) |
-| Laptop to phone | [images/03-roadmap-dev-to-glasses.png](images/03-roadmap-dev-to-glasses.png) |
 | Decision priority | [images/05-decision-priority.png](images/05-decision-priority.png) |
 
-## Phone, server, and speech
+## Glasses and spoken guidance
 
 ```mermaid
 flowchart TD
-    phone["Phone browser<br/>camera, GPS, compass, optional depth"]
-    phone --> laptop["Laptop server<br/>phone_server.py :5000"]
-    phone --> cloud["Cloud server<br/>phone_server_cloud.py ONNX"]
-    laptop --> speech["Spoken command<br/>Web Speech API"]
-    cloud --> speech
+    glasses["Smart glasses<br/>forward camera, position, heading"]
+    glasses --> service["Navigation service<br/>segmentation, depth, route"]
+    service --> voice["Voice in the ear<br/>stop, turn, or go forward"]
 ```
 
 ## Frame pipeline

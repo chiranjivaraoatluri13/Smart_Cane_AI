@@ -84,17 +84,16 @@ def canvas(w: int, h: int) -> tuple[Image.Image, ImageDraw.ImageDraw]:
 
 
 def system_context() -> None:
-    img, draw = canvas(1100, 720)
+    img, draw = canvas(1100, 640)
     title = font(28, bold=True)
-    draw.text((40, 28), "Phone, server, and speech", font=title, fill=INK)
+    draw.text((40, 28), "Glasses and spoken guidance", font=title, fill=INK)
     sub = font(16)
-    draw.text((40, 68), "The phone captures the walk. The server decides. The phone speaks.", font=sub, fill=MUTED)
-    label(draw, (80, 120, 1020, 230), "Phone browser", "Camera, GPS, compass, optional Depth Anything V2. Posts each frame to /process_frame.", BLUE)
-    arrow(draw, 550, 230, 280)
-    label(draw, (80, 280, 500, 430), "Laptop server", "python phone_server.py on the same Wi-Fi. Flask on port 5000.", GREEN)
-    label(draw, (600, 280, 1020, 430), "Cloud server", "phone_server_cloud.py on Render or Railway. SegFormer B0 INT8 ONNX.", GREEN)
+    draw.text((40, 68), "The glasses see the path. The service decides. The wearer hears the command.", font=sub, fill=MUTED)
+    label(draw, (80, 130, 1020, 250), "Smart glasses", "Forward camera, position, and heading. Any camera can stand in while the glasses build is in progress.", BLUE)
+    arrow(draw, 550, 250, 310)
+    label(draw, (80, 310, 1020, 430), "Navigation service", "ADE20K SegFormer, depth, obstacle check, and a walking route. Returns one short command.", GREEN)
     arrow(draw, 550, 430, 490)
-    label(draw, (80, 490, 1020, 640), "Spoken command", "JSON comes back with command, phrase, and speak. The phone uses the Web Speech API.", PURPLE)
+    label(draw, (80, 490, 1020, 600), "Voice in the ear", "Stop, move left, move right, or go forward. Hands stay free.", PURPLE)
     img.save(OUT / "01-system-context.png")
 
 
@@ -102,13 +101,13 @@ def pipeline() -> None:
     img, draw = canvas(1100, 980)
     draw.text((40, 24), "Frame pipeline", font=font(28, bold=True), fill=INK)
     steps = [
-        (BLUE, "Capture", "Phone camera, GPS, and heading. Laptop webcam uses the same loop."),
+        (BLUE, "Capture", "Forward camera frame, position, and heading from the glasses."),
         (GREEN, "Segmentation", "ADE20K SegFormer. ONNX INT8 in the cloud, transformers on a laptop."),
-        (GREEN, "Depth", "Phone depth_m when present. Otherwise a segmentation proxy."),
+        (GREEN, "Depth", "Metric depth from the glasses when present. Otherwise a segmentation proxy."),
         (AMBER, "CARE", "Hazard check from obstacle pixels and depth. Stop overrides the route."),
         (AMBER, "Spatial reasoner", "Picks stop, turn, or go forward. Optional Llama 3.1 can rephrase."),
         (PURPLE, "Phrase and validator", "config/phrases.yaml plus cooldown so the same line is not repeated."),
-        (PURPLE, "Speech", "Web Speech API on the phone. pyttsx3 on the laptop."),
+        (PURPLE, "Speech", "Spoken guidance in the ear."),
     ]
     y = 80
     for color, title, body in steps:
@@ -117,23 +116,6 @@ def pipeline() -> None:
             arrow(draw, 550, y + 90, y + 118)
         y += 118
     img.save(OUT / "02-pipeline-architecture.png")
-
-
-def roadmap() -> None:
-    img, draw = canvas(1100, 520)
-    draw.text((40, 24), "From laptop to phone", font=font(28, bold=True), fill=INK)
-    draw.text((40, 64), "Develop on a webcam, then run the same decision loop from the phone.", font=font(16), fill=MUTED)
-    boxes = [
-        (40, BLUE, "1. Laptop", "assistive-nav preview and run. Webcam, overlay, and pytest."),
-        (390, GREEN, "2. Same Wi-Fi", "START_PHONE_SERVER.bat. Phone opens http://laptop-ip:5000."),
-        (740, PURPLE, "3. Cloud", "Render uses render.yaml, the ONNX model, and Google walking routes."),
-    ]
-    for x, color, title, body in boxes:
-        label(draw, (x, 140, x + 320, 360), title, body, color)
-    for x in (360, 710):
-        draw.line((x, 250, x + 22, 250), fill=SLATE, width=3)
-        draw.polygon([(x + 18, 243), (x + 18, 257), (x + 30, 250)], fill=SLATE)
-    img.save(OUT / "03-roadmap-dev-to-glasses.png")
 
 
 def decision() -> None:
@@ -158,7 +140,6 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     system_context()
     pipeline()
-    roadmap()
     decision()
     for path in sorted(OUT.glob("*.png")):
         print(path, path.stat().st_size)

@@ -1,219 +1,140 @@
-# Real-Time Assistive Navigation System
+# Smart Cane AI
 
-Voice-guided navigation using a single forward-facing camera. Chains pretrained vision, depth, safety reasoning, and LLM interpretation into spoken commands such as “Move left”, “Go forward”, or “Stop”.
+Real-time walking guidance from a phone camera. The phone sends each frame, GPS, and heading to a Python server. The server segments the scene, checks obstacles, and follows a walking route, then returns a short spoken command such as “Stop”, “Move left”, or “Go forward”.
 
-**Status:** Integration prototype — segmentation runs on a real ADE20K SegFormer model; depth and CARE/LLM use real services with rule-based fallbacks.
+The phone speaks the phrase with the Web Speech API. A laptop CLI (`assistive-nav`) runs the same pipeline from a webcam for local development.
 
-## Current capabilities
+## What it does
 
-| Area | Today |
-|------|--------|
-| CLI | `preview` (segmentation overlay only), `run` (full pipeline JSON per frame) |
-| Segmentation | ADE20K **SegFormer** (`nvidia/segformer-b2-finetuned-ade-512-512`) — dense 150-class map covering indoor + outdoor surfaces |
-| Depth | On-device Depth Anything V2 (phone, posted as `depth_m`) or a segmentation-derived geometric proxy |
-| Reasoning | Spatial reasoner + optional Llama 3.1 (OpenAI-compatible) with rule-based fallback |
-| Tests | pytest suite (segmentation parsing, overlays, validator, heuristics, maps, depth) |
+| Piece | Role |
+|-------|------|
+| Phone UI | `phone_client.html` — camera, GPS, compass, optional on-device depth, speech |
+| Laptop server | `python phone_server.py` — same Wi-Fi, Flask on port 5000 |
+| Cloud server | `phone_server_cloud.py` — Render or Railway (`render.yaml`, `Procfile`) |
+| Segmentation | ADE20K SegFormer, 150 classes. Cloud default is INT8 ONNX (`segformer_b0_ade20k_int8.onnx`) |
+| Depth | Phone posts `depth_m` from Depth Anything V2, or the server uses a segmentation proxy |
+| Safety | CARE heuristic (optional HTTP). Stop wins over route guidance |
+| Route | Google Directions walking routes, with OSRM as the no-key fallback |
+| Speech | Web Speech API on the phone, pyttsx3 on the laptop |
 
-Not wired yet: UniDepthV2 metric depth, a bundled CARE server.
-
-## Pipeline stages
-
-| Stage | With a real service | Fallback (service off / unavailable) |
-|-------|---------------------|--------------------------------------|
-| **Camera / window** | Real webcam or image via OpenCV | — |
-| **Segmentation** | ADE20K SegFormer dense class map (`[segformer]` extra) | none — segmentation is required |
-| **Depth** | Client `depth_m` from on-device Depth Anything V2 | segmentation-derived geometric proxy |
-| **CARE** | HTTP POST to `CARE_ENDPOINT` | rule-based heuristic (obstacle pixels, depth) |
-| **LLM** | OpenAI-compatible API (e.g. Ollama) | rule-based commands |
-| **Validator** | cooldown / repeat suppression | — |
-| **TTS** | pyttsx3 (laptop) / Web Speech API (phone) | speaks only if enabled |
+Segmentation is required. Depth, CARE, and the LLM all fall back to rules when their service is off.
 
 ## Architecture
 
-**Product path:** develop and validate on a **workstation** (webcam / CLI) → deploy on **smart glasses** (POV camera + hands-free audio). Phone/cloud prototypes in the repo are experimental only.
+The phone captures the walk, the server decides, and the phone speaks. Develop on a laptop webcam, then use the same loop from the phone on the same Wi-Fi or on Render.
 
-Visual diagrams (PNG + Mermaid): **[docs/DIAGRAMS.md](docs/DIAGRAMS.md)** · `python scripts/render_diagrams.py`
+Diagrams: **[docs/DIAGRAMS.md](docs/DIAGRAMS.md)**. Regenerate the PNGs with `python scripts/render_diagrams.py`.
 
 | Diagram | Preview |
 |---------|---------|
-| Dev workstation context | ![dev context](docs/images/01-system-context.png) |
-| Pipeline | ![pipeline](docs/images/02-pipeline-architecture.png) |
-| Dev → glasses roadmap | ![roadmap](docs/images/03-roadmap-dev-to-glasses.png) |
+| Phone, server, and speech | ![phone and server](docs/images/01-system-context.png) |
+| Frame pipeline | ![pipeline](docs/images/02-pipeline-architecture.png) |
+| Laptop to phone | ![roadmap](docs/images/03-roadmap-dev-to-glasses.png) |
 | Decision priority | ![decision](docs/images/05-decision-priority.png) |
 
+## Pipeline
+
 ```text
-Live Camera Feed
-        ↓
-ADE20K SegFormer Semantic Segmentation
-        ↓
-Depth (segmentation proxy in dev; wearable metric depth on glasses later)
-        ↓
-CARE Navigation / Safety Prediction
-        ↓
-Spatial Reasoner (+ optional Llama 3.1)
-        ↓
-Structured Navigation Command (JSON)
-        ↓
-Safety Validator / Cooldown Logic
-        ↓
-Text-to-Speech
-        ↓
-Voice Guidance to User
+Phone camera + GPS + heading
+        |
+POST /process_frame
+        |
+ADE20K SegFormer (ONNX INT8 on cloud, transformers locally)
+        |
+Depth (client meters, else segmentation proxy)
+        |
+CARE safety check
+        |
+Spatial reasoner (+ optional Llama 3.1)
+        |
+Phrase composer + cooldown validator
+        |
+JSON { command, phrase, speak }
+        |
+Phone speaks the phrase
 ```
 
-| Stage | Module | Package path |
-|-------|--------|--------------|
-| Capture | OpenCV webcam | `navigation/capture/camera.py` |
-| Segmentation | ADE20K SegFormer | `navigation/perception/segmentation_segformer.py` |
-| Depth | client depth / segmentation proxy | `navigation/perception/depth.py` |
-| Safety | CARE direction / signal | `navigation/reasoning/care.py` |
-| Interpretation | Spatial reasoner + Llama 3.1 | `navigation/reasoning/spatial_reasoner.py`, `navigation/reasoning/llm.py` |
-| Guardrails | Cooldown + duplicate suppression | `navigation/output/validator.py` |
-| Output | TTS | `navigation/output/tts.py` |
-| Orchestration | Frame loop | `navigation/pipeline/runner.py` |
+| Stage | Module |
+|-------|--------|
+| Capture | `navigation/capture/camera.py` (laptop) or `phone_client.html` |
+| Segmentation | `navigation/perception/segmentation_segformer_onnx.py`, `segmentation_segformer.py` |
+| Depth | `navigation/perception/depth.py` |
+| Safety | `navigation/reasoning/care.py` |
+| Decision | `navigation/reasoning/spatial_reasoner.py` |
+| Route | `navigation/maps/google_directions.py`, `navigation/maps/router.py` |
+| Phrases | `navigation/reasoning/composer.py` |
+| Guardrails | `navigation/output/validator.py` |
+| Laptop speech | `navigation/output/tts.py` |
+| Frame loop | `navigation/pipeline/runner.py` |
+
+Class groups, distance buckets, and phrase templates live in `config/default.yaml` and `config/phrases.yaml`.
 
 ## Setup
 
-Use **one shell consistently** — Command Prompt (`cmd`) or PowerShell. Do not mix syntax (for example `$env:...` only works in PowerShell; `%USERPROFILE%` only in cmd).
-
-### Command Prompt (cmd)
-
-```bat
-cd /d %USERPROFILE%\Projects\assistive-navigation
-python -m venv .venv
-.venv\Scripts\activate.bat
-pip install -e ".[dev,segformer]"
-copy .env.example .env
-```
-
-Edit `.env` for the model id, API keys, and camera index.
+Python 3.10 or newer. Run these from the cloned repo root.
 
 ### PowerShell
 
 ```powershell
-cd $env:USERPROFILE\Projects\assistive-navigation
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev,segformer]"
+pip install -e ".[dev,segformer,server]"
 copy .env.example .env
 ```
 
-### Optional model stacks
+### Command Prompt
 
-Run these **from the project folder** after activating the venv:
+```bat
+python -m venv .venv
+.venv\Scripts\activate.bat
+pip install -e ".[dev,segformer,server]"
+copy .env.example .env
+```
 
 | Extra | Install | Purpose |
 |-------|---------|---------|
-| `segformer` | `pip install -e ".[segformer]"` | torch + transformers (ADE20K SegFormer) |
-| `llm` | `pip install -e ".[llm]"` | OpenAI-compatible LLM client |
-| `tts` | `pip install -e ".[tts]"` | pyttsx3 |
-| `server` | `pip install -e ".[server]"` | Flask (phone server) |
+| `segformer` | `pip install -e ".[segformer]"` | torch, transformers, onnxruntime |
+| `server` | `pip install -e ".[server]"` | Flask phone server |
+| `llm` | `pip install -e ".[llm]"` | OpenAI-compatible Llama client |
+| `tts` | `pip install -e ".[tts]"` | pyttsx3 on the laptop |
+| `dev` | `pip install -e ".[dev]"` | pytest |
 
-## Segmentation model
+Cloud deploys do not install torch. They use `requirements-cloud.txt` and the ONNX file already in the repo.
 
-The segmenter is an **ADE20K SegFormer** — every pixel gets one of 150 classes
-(floor, road, sidewalk, wall, door, stairs, person, car, …). ADE20K covers both
-indoor and outdoor scenes, so the model labels hallways, walls, and empty paths
-correctly instead of forcing every pixel into a street class. The walkable /
-obstacle / hazard groupings live in `config/default.yaml` (`ade20k_segmentation`).
+### Segmentation settings
 
-| Setting | Default | Notes |
-|---------|---------|-------|
-| `SEGMENTER_BACKEND` | `segformer` | the only backend |
-| `SEGFORMER_MODEL_ID` | `nvidia/segformer-b2-finetuned-ade-512-512` | use `...-b0-...` for faster CPU inference |
-| `SEGFORMER_DEVICE` | `auto` | `cuda` when available, else `cpu` |
-| `INFERENCE_IMGSZ` | `0` | model default; lower for speed |
+| Setting | Laptop default (`.env.example`) | Cloud (`render.yaml`) |
+|---------|----------------------------------|------------------------|
+| `SEGMENTER_BACKEND` | `segformer` | `segformer_onnx` |
+| `SEGFORMER_MODEL_ID` | `nvidia/segformer-b2-finetuned-ade-512-512` | `nvidia/segformer-b0-finetuned-ade-512-512` |
+| `SEGFORMER_ONNX_PATH` | — | `segformer_b0_ade20k_int8.onnx` |
+| `SEGFORMER_DEVICE` | `auto` | `cpu` |
 
-**CPU vs GPU:** the B2 checkpoint is accurate but slow on CPU (~8–9 s/frame).
-For real-time on CPU, switch `SEGFORMER_MODEL_ID` to the **B0** variant.
+The B2 checkpoint is slow on CPU. For a laptop demo, set `SEGMENTER_BACKEND=segformer_onnx` or pass `--fast`.
 
-### Visualization (overlay window)
-
-```bat
-cd /d %USERPROFILE%\Projects\assistive-navigation
-.venv\Scripts\activate.bat
-pip install -e ".[segformer]"
-copy .env.example .env
-
-REM Live semantic overlay (downloads the SegFormer checkpoint on first run)
-.venv\Scripts\assistive-nav.exe preview --camera 0
-
-REM Overlay for a single image
-.venv\Scripts\assistive-nav.exe preview --image tests\fixtures\sample.jpg
-
-REM Save overlay frames
-.venv\Scripts\assistive-nav.exe preview --camera 0 --max-frames 10 --seg-save-dir output
-```
+Export a new ONNX file with:
 
 ```powershell
-assistive-nav preview --image tests\fixtures\sample.jpg
+python scripts/export_segformer_onnx.py
+```
+
+## Run on a laptop
+
+```powershell
 assistive-nav preview --camera 0
+assistive-nav run --camera 0 --fast
+assistive-nav run --image tests\fixtures\sample.jpg --no-llm
 ```
 
-Press **q** in the OpenCV window to stop. The overlay tints each ADE20K class in `navigation/perception/visualize.py`.
-
-## Run
-
-### Command Prompt (cmd)
-
-```bat
-cd /d %USERPROFILE%\Projects\assistive-navigation
-.venv\Scripts\activate.bat
-
-REM Single image through the full pipeline
-.venv\Scripts\assistive-nav.exe run --image tests\fixtures\sample.jpg
-
-REM Live webcam
-.venv\Scripts\assistive-nav.exe run --camera 0
-
-REM Alternative entrypoint
-python -m navigation.cli run --image tests\fixtures\sample.jpg
-```
-
-In cmd, lines starting with `REM` are comments. Do not paste lines that begin with `#` — cmd treats them as commands.
-
-### PowerShell
-
-```powershell
-cd $env:USERPROFILE\Projects\assistive-navigation
-.\.venv\Scripts\Activate.ps1
-
-assistive-nav run --image tests\fixtures\sample.jpg
-assistive-nav run --camera 0
-```
-
-### Create the sample image (first time)
+Press **q** in the overlay window to stop a preview. Press **Ctrl+C** to stop a live run.
 
 If `tests\fixtures\sample.jpg` is missing:
 
-```bat
-.venv\Scripts\python.exe scripts\create_sample_fixture.py
+```powershell
+python scripts\create_sample_fixture.py
 ```
 
-## Map-assisted navigation (MVP)
-
-Turn-by-turn style commands from a **walking route** (OSRM public API, no key). Vision still handles **obstacles** — if segmentation/CARE reports a hazard, **stop** wins over map guidance.
-
-### Limitations
-
-- A laptop has **no real GPS or compass**. Set fixed `CURRENT_LAT` / `CURRENT_LON` in `.env` (or `--current`) for demos; production would stream position from a phone.
-- `CURRENT_HEADING_DEG` defaults to **0° (north)**. Adjust it to simulate which way you are facing along the route.
-- Route fetch needs network access once at startup.
-
-### Set destination and start
-
-**.env** (copy from `.env.example`):
-
-```env
-USE_MAP_GUIDANCE=true
-CURRENT_LAT=40.7484
-CURRENT_LON=-73.9857
-CURRENT_HEADING_DEG=45
-DEST_LAT=40.7510
-DEST_LON=-73.9830
-```
-
-**CLI** (overrides `.env`):
+Map demo (vision stop still overrides the route):
 
 ```powershell
 assistive-nav run --no-llm --use-map `
@@ -222,71 +143,65 @@ assistive-nav run --no-llm --use-map `
   --image tests\fixtures\sample.jpg
 ```
 
-Geocode an address (Nominatim, free):
+`--dest-address "Empire State Building, New York"` geocodes through Nominatim. A successful route is written to `output/route.json`.
+
+| Command | Meaning |
+|---------|---------|
+| `go_forward` | On the route and aligned with the next waypoint |
+| `move_left` / `move_right` | Turn toward the path, or step back when far off it |
+| `stop` | Near the destination, or an obstacle in the walking band |
+
+## Run from a phone
+
+On the laptop, same Wi-Fi as the phone:
 
 ```powershell
-assistive-nav run --no-llm --use-map `
-  --current "40.7484,-73.9857" `
-  --dest-address "Empire State Building, New York"
+python phone_server.py
 ```
 
-On success, the route polyline is saved to `output/route.json`.
+Or double-click `START_PHONE_SERVER.bat`. Open `http://<laptop-ip>:5000/` on the phone, allow camera and location, set a destination, then start the camera.
 
-### Commands on a path
+Cloud: connect this repo on [Render](https://render.com) using `render.yaml`. Build command `pip install -r requirements-cloud.txt`. Start command:
 
-| Command | Meaning (map mode) |
-|---------|-------------------|
-| **go_forward** | On the route and aligned with the next waypoint |
-| **move_left** / **move_right** | Turn toward the path, or step back toward the route when far off it |
-| **stop** | Within ~15 m of destination, **or** obstacle/hazard detected (vision) |
-
-Without `--use-map` (or `USE_MAP_GUIDANCE=false`), the pipeline uses the CARE/vision heuristics only.
-
-## On-device depth (Depth Anything V2 on the phone)
-
-The phone web client (`phone_client.html`) runs a real monocular depth network —
-**Depth Anything V2-Small** via [`@huggingface/transformers`](https://huggingface.co/docs/transformers.js) —
-directly in the browser on **WebGPU** (WASM fallback). This gives a genuine depth
-estimate without a hosted GPU: the phone's own hardware does the inference.
-
-Per frame (on a `DEPTH_EVERY_N` cadence) the phone estimates depth, reads the
-nearest object in the center-bottom walking band, converts it to an approximate
-distance in meters, and posts it as the `depth_m` field to `/process_frame`. The
-server passes it to `DepthEstimator.predict(external_depth_m=...)`, which feeds
-`bucketize()` unchanged. When `depth_m` is absent (model loading, no WebGPU,
-older phone), the server falls back to the segmentation proxy automatically.
-
-| Item | Where | Notes |
-|------|-------|-------|
-| Model | `phone_client.html` `<script type="module">` | `onnx-community/depth-anything-v2-small` |
-| Calibration | `DEPTH_CALIBRATION`, `DEPTH_MIN_M`, `DEPTH_MAX_M` | relative depth → approx meters; tune on device |
-| Cadence | `DEPTH_EVERY_N` | run depth on 1 of every N frames |
-| Active path | `/process_frame` response `depth_source` | `"client"` (on-device) or `"proxy"` (fallback) |
-
-Depth Anything outputs *relative* depth (normalized per frame), so meters are
-approximate — consistent with the project's "monotonic, not metric" stance. See
-[PHONE_DEPLOYMENT_GUIDE.md](PHONE_DEPLOYMENT_GUIDE.md).
-
-## Configuration
-
-- **Environment:** `.env` — model id, API keys, camera index, cooldown seconds.
-- **YAML:** `config/default.yaml` — class groupings, command vocabulary, distance/voice tuning.
-
-## Project layout
-
-```
-assistive-navigation/
-  config/default.yaml
-  navigation/
-    capture/       # camera input
-    perception/    # SegFormer segmenter + depth adapters
-    reasoning/     # CARE + spatial reasoner + Llama 3.1
-    maps/          # OSRM routing + map guidance (MVP)
-    output/        # validator + TTS
-    pipeline/      # main loop
-  tests/
+```text
+gunicorn phone_server_cloud:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
 ```
 
-## Ethics & limitations
+Set `GOOGLE_MAPS_API_KEY` in the host dashboard. Without it, routes fall back to OSRM. Details: [RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md).
 
-This is assistive **guidance**, not a certified mobility or medical device. Always validate in controlled environments before real-world use. Latency, lighting, and model errors can produce unsafe suggestions — the safety validator reduces spam but does not guarantee correctness.
+The phone can estimate depth itself (Depth Anything V2 Small, WebGPU with a WASM fallback) and post it as `depth_m`. The `/process_frame` response field `depth_source` is `client` or `proxy`. Meters are approximate. Tuning notes: [PHONE_DEPLOYMENT_GUIDE.md](PHONE_DEPLOYMENT_GUIDE.md).
+
+## Tests
+
+```powershell
+pytest
+```
+
+## More docs
+
+| Guide | Contents |
+|-------|----------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Phone client, cloud server, per-frame data flow |
+| [RUN_GUIDE.md](RUN_GUIDE.md) | CLI modes: preview, live camera, `--fast`, `--demo` |
+| [WALKING_GUIDE.md](WALKING_GUIDE.md) | Outdoor walking with `walking_mode.bat` |
+| [PHONE_DEPLOYMENT_GUIDE.md](PHONE_DEPLOYMENT_GUIDE.md) | Phone client and on-device depth |
+| [RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md) | Render web service |
+| [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md) | Pre-deploy checks |
+| [VIDEO_PROCESSING_GUIDE.md](VIDEO_PROCESSING_GUIDE.md) | Replay a recorded walk |
+
+## Layout
+
+```text
+config/                  default.yaml, phrases.yaml
+navigation/              capture, perception, reasoning, maps, output, pipeline
+phone_client.html        phone UI
+phone_server.py          laptop Flask server
+phone_server_cloud.py    cloud entrypoint
+segformer_b0_ade20k_int8.onnx
+scripts/                 fixture, ONNX export, smoke checks
+tests/
+```
+
+## Limits
+
+This is guidance software, not a certified mobility or medical device. Lighting, latency, and model mistakes can produce a bad suggestion. The validator cuts repeated speech. It does not make a command safe. Try it in a controlled space before relying on it while walking.

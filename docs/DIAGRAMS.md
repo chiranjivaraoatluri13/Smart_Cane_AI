@@ -8,9 +8,9 @@ python scripts/render_diagrams.py
 
 | Diagram | File |
 |---------|------|
-| Glasses and spoken guidance | [images/01-system-context.png](images/01-system-context.png) |
-| Frame pipeline | [images/02-pipeline-architecture.png](images/02-pipeline-architecture.png) |
-| Decision priority | [images/05-decision-priority.png](images/05-decision-priority.png) |
+| Glasses and spoken guidance | [images/01-glasses-guidance.png](images/01-glasses-guidance.png) |
+| Frame pipeline | [images/02-frame-pipeline.png](images/02-frame-pipeline.png) |
+| Decision priority | [images/03-decision-priority.png](images/03-decision-priority.png) |
 
 ## Glasses and spoken guidance
 

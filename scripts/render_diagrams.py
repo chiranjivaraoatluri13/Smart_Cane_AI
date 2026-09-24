@@ -94,7 +94,7 @@ def system_context() -> None:
     label(draw, (80, 310, 1020, 430), "Navigation service", "ADE20K SegFormer, depth, obstacle check, and a walking route. Returns one short command.", GREEN)
     arrow(draw, 550, 430, 490)
     label(draw, (80, 490, 1020, 600), "Voice in the ear", "Stop, move left, move right, or go forward. Hands stay free.", PURPLE)
-    img.save(OUT / "01-system-context.png")
+    img.save(OUT / "01-glasses-guidance.png")
 
 
 def pipeline() -> None:
@@ -115,7 +115,7 @@ def pipeline() -> None:
         if title != "Speech":
             arrow(draw, 550, y + 90, y + 118)
         y += 118
-    img.save(OUT / "02-pipeline-architecture.png")
+    img.save(OUT / "02-frame-pipeline.png")
 
 
 def decision() -> None:
@@ -133,7 +133,7 @@ def decision() -> None:
     for color, title, body in rows:
         label(draw, (80, y, 1020, y + 100), title, body, color)
         y += 120
-    img.save(OUT / "05-decision-priority.png")
+    img.save(OUT / "03-decision-priority.png")
 
 
 def main() -> None:

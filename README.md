@@ -26,9 +26,9 @@ Diagrams: **[docs/DIAGRAMS.md](docs/DIAGRAMS.md)**. Regenerate the PNGs with `py
 
 | Diagram | Preview |
 |---------|---------|
-| Glasses and spoken guidance | ![glasses and guidance](docs/images/01-system-context.png) |
-| Frame pipeline | ![pipeline](docs/images/02-pipeline-architecture.png) |
-| Decision priority | ![decision](docs/images/05-decision-priority.png) |
+| Glasses and spoken guidance | ![glasses and guidance](docs/images/01-glasses-guidance.png) |
+| Frame pipeline | ![pipeline](docs/images/02-frame-pipeline.png) |
+| Decision priority | ![decision](docs/images/03-decision-priority.png) |
 
 ## Pipeline
 
